@@ -1,0 +1,52 @@
+# general parameters
+
+nTimesteps: 24 # number of timesteps per representative day
+
+
+# Generator parameters
+dispatchableGenerators:
+ Base:
+  bidPrice: 30 # EUR/MWh
+  capacity: 1500 # MW
+
+ Peak:
+  bidPrice: 100 # EUR/MWh
+  capacity: 700 # MW
+
+variableGenerators:
+  Wind:
+    bidPrice: 0         # EUR/MWh
+    capacity: 1000        # MW
+    # Low at night, strong in the afternoon/evening, length = 24
+    profile: [
+      0.20, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60,
+      0.40, 0.35, 0.30, 0.30, 0.25, 0.25, 0.20, 0.20,
+      0.70, 0.80, 0.85, 0.80, 0.75, 0.70, 0.60, 0.50
+    ]
+    
+
+# Storage parameters
+batteryStorage:
+  energyCapacity: 800 # MWh
+  powerCapacity: 400 # MW
+  efficiency: 0.9
+  initialSOC: 0.2 # as fraction of energyCapacity
+
+
+# Demand parameters
+demand:
+  segments:
+    Base:
+      bidPrice: 300   # EUR/MWh (high willingness to pay)
+      quantity: [
+        1500, 1500, 1500, 1600, 1800, 1900,   # night time
+        2300, 2500, 2200, 2200, 2300, 2200,        # morning peak
+        2100, 2200, 2200, 2200,                         # mid and afternoon
+        2400, 2500, 2600, 2500, 2200, 2100, 1900, 1700   # evening peak and drop
+      ]
+
+    Flex:
+      bidPrice: 50   # EUR/MWh (elastic, only if price low)
+      quantity: [200, 200, 200, 200, 200, 300, 400, 500,
+                 500, 500, 500, 500, 500, 500, 400, 300,
+                 300, 300, 300, 300, 300, 300, 300, 300]
