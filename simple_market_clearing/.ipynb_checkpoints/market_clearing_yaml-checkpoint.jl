@@ -262,7 +262,7 @@ function build_market_clearing!(m::Model)
 end
 
 # Step 4: solve model and plot prices
-data = load_input_data("simple_market_clearing\\input_data.yaml")  # adjust filename if needed
+data = load_input_data("input_data.yaml")  # adjust filename if needed
 
 # create the optimisation model with HiGHS as the solver
 m = Model(HiGHS.Optimizer)
