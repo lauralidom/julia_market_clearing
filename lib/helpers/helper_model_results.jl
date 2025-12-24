@@ -1,0 +1,60 @@
+module HelperModelResults
+
+using JuMP
+
+#=
+	hours = HelperModelResults.Hours(m)
+	prices = HelperModelResults.Prices(m)
+	Qch_val = HelperModelResults.StorageChargeQuantities(m)
+	Qdis_val = HelperModelResults.StorageDischargeQuantities(m)
+=#
+
+function Hours(m::Model)
+	# compute hourly market-clearing prices as duals of the energy balance constraints
+	JH = m.ext[:sets][:JH]
+	return collect(JH)  # collect https://docs.julialang.org/en/v1/base/collections/#Base.collect-Tuple%7BAny%7D - unclear to me why this is needed
+end
+
+function Prices(m::Model)
+	# compute hourly market-clearing prices as duals of the energy balance constraints
+	JH = m.ext[:sets][:JH]
+	λ  = dual.(m.ext[:constraints][:energy_balance])   # hourly prices [EUR/MWh]
+	return [λ[h] for h in JH]
+end
+
+function StorageChargeQuantities(m)
+	if m.ext[:parameters][:has_storage]
+	    Qch_val = value.(m.ext[:variables][:Qch])
+	else
+		return error("no storage")
+	end
+end
+
+function StorageDischargeQuantities(m)
+	if m.ext[:parameters][:has_storage]
+	   	return Qdis_val = value.(m.ext[:variables][:Qdis])
+	else
+		return error("no storage")
+	end
+end
+
+function SOCValues(m)
+	if m.ext[:parameters][:has_storage]
+	   	return SOC_val = value.(m.ext[:variables][:SOC])
+	else
+		return error("no storage")
+	end
+end
+
+function GenData(m)
+	hours = Hours(m)
+	IG = m.ext[:sets][:IG]
+    gen_data = Dict{String, Vector{Float64}}()
+    for g in IG
+        gen_data[g] = [value(m.ext[:variables][:Qg][g,h]) for h in hours]
+    end
+    return gen_data
+end
+
+
+end;

@@ -133,6 +133,7 @@ function process_parameters!(m::Model, data::Dict{Symbol,Any})
         m.ext[:parameters][:storage_power_capacity] = float(storage["powerCapacity"])
         m.ext[:parameters][:storage_efficiency] = float(storage["efficiency"])
         m.ext[:parameters][:storage_initial_soc] = float(storage["initialSOC"]) * float(storage["energyCapacity"])
+        m.ext[:parameters][:storage_end_soc] = float(storage["endSOC"]) * float(storage["energyCapacity"])
         m.ext[:parameters][:has_storage] = true
     else
         m.ext[:parameters][:has_storage] = false
@@ -178,6 +179,7 @@ function build_market_clearing!(m::Model)
         Qdis = m.ext[:variables][:Qdis] = @variable(m, 0 <= Qdis[h in JH] <= P_cap)
         SOC = m.ext[:variables][:SOC] = @variable(m, 0 <= SOC[h in JH] <= E_cap)
         SOC_init = m.ext[:parameters][:storage_initial_soc]
+        SOC_end = m.ext[:parameters][:storage_end_soc]
     end
 
     # OBJECTIVE: maximise welfare (value of demand minus generation cost)
@@ -226,7 +228,7 @@ function build_market_clearing!(m::Model)
         end
         
         # Cyclic constraint: end where you started (optional, but good for daily optimization)
-        @constraint(m, SOC[end] == 0)
+        @constraint(m, SOC[end] == SOC_end)
     end
 
     # Question: is there an explicit "you can't charge and discharge at the same timestep" constraint? Maybe this isn't needed explicitly.
