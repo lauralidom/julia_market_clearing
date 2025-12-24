@@ -23,6 +23,15 @@ variableGenerators:
       0.40, 0.35, 0.30, 0.30, 0.25, 0.25, 0.20, 0.20,
       0.70, 0.80, 0.85, 0.80, 0.75, 0.70, 0.60, 0.50
     ]
+  Solar:
+    bidPrice: 0         # EUR/MWh
+    capacity: 600        # MW
+    # Zero at night, strong in the afternoon, length = 24
+    profile: [
+      0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10,
+      0.20, 0.35, 0.50, 0.60, 0.75, 0.85, 0.90, 0.80,
+      0.70, 0.50, 0.25, 0.00, 0.00, 0.00, 0.00, 0.00
+    ]
     
 
 # Storage parameters
@@ -30,7 +39,8 @@ batteryStorage:
   energyCapacity: 800 # MWh
   powerCapacity: 400 # MW
   efficiency: 0.9
-  initialSOC: 0.2 # as fraction of energyCapacity
+  initialSOC: 0.5 # as fraction of energyCapacity
+  endSOC: 0.5 # as fraction of energyCapacity
 
 
 # Demand parameters
