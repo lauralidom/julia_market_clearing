@@ -1,0 +1,65 @@
+# general parameters
+
+strategy: rolling # strategy for clearing market
+nTimesteps: 24 # number of timesteps in input data
+clearForDays: 5 # number of days to clear market for
+clearingInterval: 1 # number of hours between market clearing/optimization rounds
+clearingWindow: 24 # number of hours to consider in each round
+
+# Generator parameters
+dispatchableGenerators:
+ Base:
+  bidPrice: 30 # EUR/MWh
+  capacity: 1500 # MW
+
+ Peak:
+  bidPrice: 100 # EUR/MWh
+  capacity: 700 # MW
+
+variableGenerators:
+  Wind:
+    bidPrice: 0         # EUR/MWh
+    capacity: 1200        # MW
+    # Low at night, strong in the afternoon/evening, length = 24
+    profile: [
+      0.20, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60,
+      0.40, 0.35, 0.30, 0.30, 0.25, 0.25, 0.20, 0.20,
+      0.70, 0.80, 0.85, 0.80, 0.75, 0.70, 0.60, 0.50
+    ]
+  Solar:
+    bidPrice: 0         # EUR/MWh
+    capacity: 900        # MW
+    # Zero at night, strong in the afternoon, length = 24
+    profile: [
+      0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10,
+      0.20, 0.35, 0.50, 0.60, 0.75, 0.85, 0.90, 0.80,
+      0.70, 0.50, 0.25, 0.00, 0.00, 0.00, 0.00, 0.00
+    ]
+    
+
+# Storage parameters
+batteryStorage:
+  energyCapacity: 800 # MWh
+  powerCapacity: 400 # MW
+  efficiency: 0.9
+  initialSOC: 0.5 # as fraction of energyCapacity
+  endSOC: 0.5 # as fraction of energyCapacity
+
+
+# Demand parameters
+demand:
+  segments:
+    Base:
+      bidPrice: 300   # EUR/MWh (high willingness to pay)
+      quantity: [
+        1500, 1500, 1500, 1600, 1800, 1900,   # night time
+        2300, 2500, 2200, 2200, 2300, 2200,        # morning peak
+        2100, 2200, 2200, 2200,                         # mid and afternoon
+        2400, 2500, 2600, 2500, 2200, 2100, 1900, 1700   # evening peak and drop
+      ]
+
+    Flex:
+      bidPrice: 50   # EUR/MWh (elastic, only if price low)
+      quantity: [200, 200, 200, 200, 200, 300, 400, 500,
+                 500, 500, 500, 500, 500, 500, 400, 300,
+                 300, 300, 300, 300, 300, 300, 300, 300]

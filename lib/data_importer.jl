@@ -17,6 +17,15 @@ function load_input_data(path::String)
     T = Int(cfg["nTimesteps"])
     data[:T] = T
 
+    # string defining which model/strategy we want to use to clear the market
+    data[:strategy] = String(cfg["strategy"])
+
+    if data[:strategy] == "rolling"
+        data[:clearForDays] = Int(cfg["clearForDays"])
+        data[:clearingInterval] = Int(cfg["clearingInterval"])
+        data[:clearingWindow] = Int(cfg["clearingWindow"])
+    end
+
     # generators: separate blocks for dispatchable and variable generators
     data[:dispatchableGenerators] = cfg["dispatchableGenerators"]
     data[:variableGenerators]     = get(cfg, "variableGenerators", Dict())

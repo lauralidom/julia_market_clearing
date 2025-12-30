@@ -1,7 +1,10 @@
-module BuildModel
+module RollingModel
 
 using JuMP
 using HiGHS
+
+# NOTE: THIS IS AN EVOLVING COPY OF THE BASIC MODEL FOR NOW - TA 2025-12-29
+# I expect that this model and the basic one would be equivalent if the nDays was set to 1 - this should be covered by a unit test.
 
 	# Step 2a: create lists for the variables (sets) - note the !, we are modifying the model.
 
@@ -13,7 +16,7 @@ using HiGHS
 =#
 
 
-function define_sets!(m::Model, data::Dict{Symbol,Any})
+function define_sets!(m::Model, data::Dict{Symbol,Any}, start_at_period::Int)
     # Store all sets in a dedicated dictionary attached to the model
     m.ext[:sets] = Dict{Symbol,Any}()
 
@@ -22,8 +25,14 @@ function define_sets!(m::Model, data::Dict{Symbol,Any})
     var_gen  = data[:variableGenerators]
     dem      = data[:demandSegments]
 
+    days = data[:clearForDays]
+    clearingInterval = data[:clearingInterval]
+    clearingWindow = data[:clearingWindow]
+
     # time periods JH = {1,...,T}
-    m.ext[:sets][:JH] = 1:T
+    m.ext[:sets][:JH] = 1:T*days # all periods in the whole set, this is not great as there is an assumption here that 24 is always the input data length and they are hours - TODO: fix this
+    m.ext[:sets][:CH] = start_at_period : (clearingWindow + start_at_period  - 1)   # periods for this clearing window, note -1 b/c 1 indexed
+    m.ext[:sets][:ClearingInterval] = clearingInterval     # clearing interval dictates how often we clear the market
 
     # generators IG = list of all generator names (dispatchable + variable)
     IG = String[]
@@ -46,14 +55,13 @@ function define_sets!(m::Model, data::Dict{Symbol,Any})
 end
 
 # Step 2b: process time-series data (turn YAML parameters into hourly prices/quantities)
-function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
+function process_time_series_data!(m::Model, data::Dict{Symbol,Any}, start_at_period::Int)
     disp_gen = data[:dispatchableGenerators]
     var      = data[:variableGenerators]
     dem      = data[:demandSegments]
 
-    JH = m.ext[:sets][:JH] # JH is used
-    IG = m.ext[:sets][:IG] # i think that IG and ID are actually not used in this function - it's working from the YAML-based dict directly
-    ID = m.ext[:sets][:ID]
+    JH = m.ext[:sets][:JH] # JH is the number of hours/periods across all periods in the set (potentially many days)
+    CH = m.ext[:sets][:CH] # (adds start_at_period to each element of CH vector), minus 1 because 1 indexed # CH is the number of hours/periods for the clearing window
 
     # generator prices P_gen and hourly maximum quantities Q_gen[g,h]
     # stored as dictionaries keyed by (generator, hour)
@@ -66,7 +74,7 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
         P = float(gdata_any["bidPrice"])   # constant bid price P [EUR/MWh]
         Q = float(gdata_any["capacity"])   # constant capacity Q [MW]
 
-        for h in JH
+        for h in CH
             Pr_gen[(g,h)] = P
             Q_gen[(g,h)]  = Q
         end
@@ -80,12 +88,13 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
         profile_any = gdata_any["profile"] # availability factors per hour
         profile = [float(x) for x in profile_any]
 
-        length(profile) == length(JH) || error("Profile for $g must have length $(length(JH)).") # Note use of julia-style || as conditional here.
+        # length(profile) == length(JH) || error("Profile for $g must have length $(length(JH)).") # Note: this condition does not apply, we will be duplicating the data for now if it is not long enough.
 
 
         # This block modifies the capacity with the availability factor (profile) from the config
-        for h in JH
-            af = profile[h]                # availability factor in hour h
+        for h in CH
+            profileH = (h % length(profile)) + 1 # modulo operator here makes af below repeat the input profile to fill +1 b/c these are not zero indexed
+            af = profile[profileH]                # availability factor in hour profileH
             Pr_gen[(g,h)] = P
             Q_gen[(g,h)]  = Q * af         # available capacity = Q * profile[h]
         end
@@ -102,11 +111,12 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
         q_any = ddata_any["quantity"]           # hourly max quantity
         q_vec = [float(x) for x in q_any]
 
-        length(q_vec) == length(JH) || error("Quantity vector for demand segment $d must have length $(length(JH)).") # Note use of julia-style || as conditional here.
+        # length(q_vec) == length(JH) || error("Quantity vector for demand segment $d must have length $(length(JH)).") # Note: this condition does not apply, we will be duplicating the data for now if it is not long enough.
 
-        for h in JH
+        for h in CH
+            demandH = (h % length(q_vec)) + 1 # modulo here repeats the data in the demand quantity input over the requested days +1 b/c these are not zero index
             Pr_dem[(d,h)] = P
-            Q_dem[(d,h)]  = q_vec[h]
+            Q_dem[(d,h)]  = q_vec[demandH] # similar to above, use the demandH here to repeat demand profile each day
         end
     end
 
@@ -144,13 +154,14 @@ end
 
 # Step 3: build market-clearing model
 # initialise dictionaries for variables, expressions and constraints
-function build_market_clearing!(m::Model)
+function build_market_clearing!(m::Model, start_at_period::Int)
     m.ext[:variables]   = Dict{Symbol,Any}()
     m.ext[:expressions] = Dict{Symbol,Any}()
     m.ext[:constraints] = Dict{Symbol,Any}()
 
     # load sets and time series from previous steps
-    JH = m.ext[:sets][:JH]
+    # note that this section now selects the data from the time slice we are interested in
+    CH = m.ext[:sets][:CH] # (adds start_at_period to each element of CH vector), minus 1 because 1 indexed
     IG = m.ext[:sets][:IG]
     ID = m.ext[:sets][:ID]
 
@@ -162,8 +173,8 @@ function build_market_clearing!(m::Model)
     # decision variables:
     # Qg[g,h] = dispatched generation of unit g in hour h [MW]
     # Qd[d,h] = served demand of segment d in hour h [MW]
-    Qd = m.ext[:variables][:Qd] = @variable(m, Qd[d in ID, h in JH] >= 0)
-    Qg = m.ext[:variables][:Qg] = @variable(m, Qg[g in IG, h in JH] >= 0)
+    Qd = m.ext[:variables][:Qd] = @variable(m, Qd[d in ID, h in CH] >= 0)
+    Qg = m.ext[:variables][:Qg] = @variable(m, Qg[g in IG, h in CH] >= 0)
 
     # Storage variables
     has_storage = m.ext[:parameters][:has_storage]
@@ -175,9 +186,9 @@ function build_market_clearing!(m::Model)
         # Qch[h] = charging power in hour h [MW]
         # Qdis[h] = discharging power in hour h [MW]
         # SOC[h] = state of charge at end of hour h [MWh]
-        Qch = m.ext[:variables][:Qch] = @variable(m, 0 <= Qch[h in JH] <= P_cap)
-        Qdis = m.ext[:variables][:Qdis] = @variable(m, 0 <= Qdis[h in JH] <= P_cap)
-        SOC = m.ext[:variables][:SOC] = @variable(m, 0 <= SOC[h in JH] <= E_cap)
+        Qch = m.ext[:variables][:Qch] = @variable(m, 0 <= Qch[h in CH] <= P_cap)
+        Qdis = m.ext[:variables][:Qdis] = @variable(m, 0 <= Qdis[h in CH] <= P_cap)
+        SOC = m.ext[:variables][:SOC] = @variable(m, 0 <= SOC[h in CH] <= E_cap)
         SOC_init = m.ext[:parameters][:storage_initial_soc]
         SOC_end = m.ext[:parameters][:storage_end_soc]
     end
@@ -185,33 +196,33 @@ function build_market_clearing!(m::Model)
     # OBJECTIVE: maximise welfare (value of demand minus generation cost)
     # sum_d,h P_dem(d) * Qd[d,h]  -  sum_g,h P_gen(g,h) * Qg[g,h]
     m.ext[:objective] = @objective(m, Max,
-        sum(Pr_dem[(String(d),h)] * Qd[d,h] for d in ID, h in JH) -
-        sum(Pr_gen[(String(g),h)] * Qg[g,h] for g in IG, h in JH)
+        sum(Pr_dem[(String(d),h)] * Qd[d,h] for d in ID, h in CH) -
+        sum(Pr_gen[(String(g),h)] * Qg[g,h] for g in IG, h in CH)
     )
 
     # energy balance: in each hour, total generation equals total served demand
     #if storage, add storage charging/discharging
     if has_storage
         m.ext[:constraints][:energy_balance] = @constraint(
-            m, [h in JH],
+            m, [h in CH],
             sum(Qg[g,h] for g in IG) + Qdis[h] - Qch[h] - sum(Qd[d,h] for d in ID) == 0
         )
     else
         m.ext[:constraints][:energy_balance] = @constraint(
-            m, [h in JH],
+            m, [h in CH],
             sum(Qg[g,h] for g in IG) - sum(Qd[d,h] for d in ID) == 0
         )
     end
 
     # generator limits: generation cannot exceed available capacity Q_gen[g,h]
     m.ext[:constraints][:gen_limits] = @constraint(
-        m, [g in IG, h in JH],
+        m, [g in IG, h in CH],
         Qg[g,h] <= Q_gen[(String(g),h)]
     )
 
     # demand limits: served demand cannot exceed maximum quantity Q_dem[d,h]
     m.ext[:constraints][:dem_limits] = @constraint(
-        m, [d in ID, h in JH],
+        m, [d in ID, h in CH],
         Qd[d,h] <= Q_dem[(String(d),h)]
     )
 
@@ -220,15 +231,16 @@ function build_market_clearing!(m::Model)
         η = m.ext[:parameters][:storage_efficiency]
         
         # State of charge dynamics: SOC[h] = SOC[h-1] + η*Qch[h] - Qdis[h]/η
-        # For first hour h=1, use initial SOC
-        @constraint(m, SOC[1] == SOC_init + η * Qch[1] - Qdis[1] / η)
+        # For first hour h=start_at_period, use initial SOC
+        # TODO: this needs to be reworked so we can feed forward the SOC result from the previous round
+        @constraint(m, SOC[start_at_period] == SOC_init + η * Qch[start_at_period] - Qdis[start_at_period] / η)
         
-        for h in 2:length(JH)
+        for h in range(start_at_period + 1,(start_at_period -1)+length(CH))
             @constraint(m, SOC[h] == SOC[h-1] + η * Qch[h] - Qdis[h] / η)
         end
         
         # Cyclic constraint: end where you started (optional, but good for daily optimization)
-        @constraint(m, SOC[end] == SOC_end)
+        @constraint(m, SOC[start_at_period+length(CH) - 1] == SOC_end)
     end
 
     # Question: is there an explicit "you can't charge and discharge at the same timestep" constraint? Maybe this isn't needed explicitly.
@@ -236,20 +248,22 @@ function build_market_clearing!(m::Model)
     return m
 end
 
-# it would be nice if here we could make the config switch between some different model options
+# the config switches between some different model options
 
-function build(data)
+function build_for_hour(data, hour::Int, previous_hour_data)
 
 	# create the optimisation model with HiGHS as the solver
-	m = Model(HiGHS.Optimizer)
+
+    m = Model(HiGHS.Optimizer)
 
 	# build the sets, time series and parameters based on the YAML data
-	define_sets!(m, data)
-	process_time_series_data!(m, data)
+	define_sets!(m, data, hour)
+	process_time_series_data!(m, data, hour)
 	process_parameters!(m, data)
 
 	# create variables, constraints and objective, then solve
-	build_market_clearing!(m)
+	build_market_clearing!(m, hour)
+
 
 	return m
 end

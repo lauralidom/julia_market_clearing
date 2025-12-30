@@ -10,16 +10,16 @@ using JuMP
 =#
 
 function Hours(m::Model)
-	# compute hourly market-clearing prices as duals of the energy balance constraints
-	JH = m.ext[:sets][:JH]
-	return collect(JH)  # collect https://docs.julialang.org/en/v1/base/collections/#Base.collect-Tuple%7BAny%7D - unclear to me why this is needed
+	# return the hours cleared in this model
+	CH = m.ext[:sets][:CH]
+	return collect(CH)  # collect https://docs.julialang.org/en/v1/base/collections/#Base.collect-Tuple%7BAny%7D - unclear to me why this is needed
 end
 
 function Prices(m::Model)
 	# compute hourly market-clearing prices as duals of the energy balance constraints
-	JH = m.ext[:sets][:JH]
+	CH = m.ext[:sets][:CH]
 	λ  = dual.(m.ext[:constraints][:energy_balance])   # hourly prices [EUR/MWh]
-	return [λ[h] for h in JH]
+	return [λ[h] for h in CH]
 end
 
 function StorageChargeQuantities(m)
@@ -55,6 +55,18 @@ function GenData(m)
     end
     return gen_data
 end
+
+
+function DemandData(m)
+	hours = Hours(m)
+	ID = m.ext[:sets][:ID]
+    dem_data = Dict{String, Vector{Float64}}()
+    for d in ID
+        dem_data[d] = [value(m.ext[:variables][:Qd][d,h]) for h in hours]
+    end
+    return dem_data
+end
+
 
 
 end;

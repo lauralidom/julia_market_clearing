@@ -1,18 +1,18 @@
-module PlotGenerationStack
+module PlotGenerationStackRolling
 
 using Plots
 using JuMP
 using Statistics
 
-include("..\\helpers\\helper_model_results.jl")
+include("..\\output_data\\process_data.jl")
 
-function plot(m::Model)
+function plot(resultset)
 
-	hours = HelperModelResults.Hours(m)
-	gen_data = HelperModelResults.GenData(m)
-    dem_data = HelperModelResults.DemandData(m)
-	Qdis_val = HelperModelResults.StorageDischargeQuantities(m)
-	Qch_val = HelperModelResults.StorageChargeQuantities(m)
+	hours = ProcessData.Hours(resultset)
+	gen_data = ProcessData.GenData(resultset)
+    dem_data = ProcessData.DemandData(resultset)
+	Qdis_val = ProcessData.StorageDischargeQuantities(resultset)
+	Qch_val = ProcessData.StorageChargeQuantities(resultset)
 
 	
     # Define consistent colors
@@ -47,7 +47,7 @@ function plot(m::Model)
     p3 = Plots.plot(xlabel="Hour", ylabel="Power (MW)",
             title="Generation & Demand Stack",
             legend=:topright,
-            ylims=(0, max_y))
+            ylims=(0, max_y),size=(1200,1200))
 
     # Stack manually using areaplot with seriestype
     for i in 1:size(stack_matrix, 1)
