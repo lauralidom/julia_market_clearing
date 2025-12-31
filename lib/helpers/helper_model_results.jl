@@ -22,6 +22,16 @@ function Prices(m::Model)
 	return [λ[h] for h in CH]
 end
 
+function BidPrices(m)
+	hours = Hours(m)
+	IG = m.ext[:sets][:IG]
+    bid_prices = Dict{String, Vector{Float64}}()
+    for g in IG
+        bid_prices[g] = [value(m.ext[:timeseries][:Pr_gen][g,h]) for h in hours]
+    end
+    return bid_prices
+end
+
 function StorageChargeQuantities(m)
 	if m.ext[:parameters][:has_storage]
 	    Qch_val = value.(m.ext[:variables][:Qch])

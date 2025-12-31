@@ -15,9 +15,11 @@ mutable struct ClearingData
 	Hours::Vector{Int}
 	Prices::Vector{Number}
 	GenData::Dict{String, Vector{Float64}}
+	BidPrices::Dict{String, Vector{Float64}} # only gens for now
 	DemandData::Dict{String, Vector{Float64}}
 	StorageDischargeQuantities::Vector{Float64} # TODO: should rethink data format here for storage
 	StorageChargeQuantities::Vector{Float64}
+	StorageStateOfCharge::Vector{Float64}
 	ClearingData() = new()
 end
 
@@ -40,10 +42,12 @@ function AddToResultSet!(resultset, model, hour)
 	cd.ObjectiveValue = objective_value(model)
 	cd.Hours = HelperModelResults.Hours(model)
 	cd.Prices = HelperModelResults.Prices(model)
+	cd.BidPrices = HelperModelResults.BidPrices(model)
 	cd.GenData = HelperModelResults.GenData(model)
 	cd.DemandData = HelperModelResults.DemandData(model)
 	cd.StorageDischargeQuantities = HelperModelResults.StorageDischargeQuantities(model)
 	cd.StorageChargeQuantities = HelperModelResults.StorageChargeQuantities(model)
+	cd.StorageStateOfCharge = HelperModelResults.SOCValues(model)
 	push!(resultset, cd)
 end
 
@@ -91,6 +95,25 @@ function GenData(resultset)
 end
 
 
+function BidPricesForHour(resultset, generator, hour)
+	bid_prices = Dict{Int,Float64}()
+	for result in resultset
+		hour - result.BaseHour > 0 && hour - result.BaseHour <= length(result.BidPrices[generator]) ? bid_prices[result.BaseHour] =  result.BidPrices[generator][hour - result.BaseHour] : continue
+	end
+	return bid_prices
+end
+
+
+function GenDispatchDataForHour(resultset, generator, hour) 
+	gen_data = Dict{Int,Tuple{Float64,Float64}}()
+	for result in resultset
+		hoursAhead = hour - result.BaseHour
+		hoursAhead > 0 && hoursAhead <= length(result.GenData[generator]) ? gen_data[result.BaseHour] = (result.GenData[generator][hoursAhead], result.Prices[hoursAhead]) : continue	
+	end
+	return gen_data
+end
+
+
 function DemandData(resultset)
 	demand_data = Dict{String, Vector{Float64}}()
 	for key in keys(resultset[1].DemandData)
@@ -107,7 +130,7 @@ end
 function StorageDischargeQuantities(resultset)
 	storage_data = Vector{Float64}()
 	for result in resultset
-		push!(storage_data, result.StorageDischargeQuantities[1]) # only getting the demand data for this base hour - fully cleared final dispatch
+		push!(storage_data, result.StorageDischargeQuantities[1]) # only getting the discharge quantity for this base hour - fully cleared final dispatch
 	end
 	return storage_data
 end
@@ -115,9 +138,18 @@ end
 function StorageChargeQuantities(resultset)
 	storage_data = Vector{Float64}()
 	for result in resultset
-		push!(storage_data, result.StorageChargeQuantities[1]) # only getting the demand data for this base hour - fully cleared final dispatch
+		push!(storage_data, result.StorageChargeQuantities[1]) # only getting the charge quantity for this base hour - fully cleared final dispatch
 	end
 	return storage_data
+end
+
+
+function StorageStateOfChargeOutcomes(resultset)
+	SOC_data = Vector{Float64}()
+	for result in resultset
+		push!(SOC_data, result.StorageStateOfCharge[1]) # only getting the SOC for this base hour - fully cleared final result
+	end
+	return SOC_data
 end
 
 # todo: maybe a write to csv or similar to have "raw" data to work with

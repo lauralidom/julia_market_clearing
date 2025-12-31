@@ -20,7 +20,7 @@ function load_input_data(path::String)
     # string defining which model/strategy we want to use to clear the market
     data[:strategy] = String(cfg["strategy"])
 
-    if data[:strategy] == "rolling"
+    if data[:strategy] != "basic"
         data[:clearForDays] = Int(cfg["clearForDays"])
         data[:clearingInterval] = Int(cfg["clearingInterval"])
         data[:clearingWindow] = Int(cfg["clearingWindow"])

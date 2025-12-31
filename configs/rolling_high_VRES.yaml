@@ -23,7 +23,7 @@ dispatchableGenerators:
 variableGenerators:
   Wind:
     bidPrice: 0         # EUR/MWh
-    capacity: 1200        # MW
+    capacity: 2600        # MW
     # Low at night, strong in the afternoon/evening, length = 24
     profile: [
       0.20, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60,
