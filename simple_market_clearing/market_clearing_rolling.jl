@@ -30,7 +30,7 @@ total_hours = sim_days * 24 + 1
 
 println("Rolling Horizon Market Clearing Simulation")
 println("Simulation: $sim_days days + 1 prep hour | Look-ahead: $look_ahead hours | Reclear frequency: every $reclear_freq hour(s)")
-println()
+println() #this adds an enter line
 
 # Load the base data structure
 data = load_input_data("input_data_rolling.yaml")
