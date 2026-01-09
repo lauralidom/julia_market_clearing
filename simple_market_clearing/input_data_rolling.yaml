@@ -1,10 +1,9 @@
 # Rolling horizon parameters
 rolling_horizon:
-  simulation_days: 2              # total days to simulate (2 days for testing)
+  simulation_days: 2             # total days to simulate 
   look_ahead_window: 24           # hours to optimise ahead
   reclear_frequency: 1            # reclear every N hours
   forecast_noise_std: 0.05        # standard deviation of wind forecast noise (0 = no noise)
-  apply_noise_to_realtime: false  # if true, re-forecast even already-executed hours
 
 
 # Generator parameters
