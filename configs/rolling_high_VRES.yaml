@@ -48,6 +48,8 @@ batteryStorage:
   efficiency: 0.9
   initialSOC: 0.5 # as fraction of energyCapacity
   endSOC: 0.5 # as fraction of energyCapacity
+  endSOCRange: [0.2,0.8] # acceptable range of end SOCs as a fraction of energyCapacity - but will it always shoot for the low end? maybe the energy in storage needs to be explicitly valued in the objective function?
+  useEndSOCRange: true # toggle between a set goal and an open range of acceptable end SOCs
 
 
 # Demand parameters

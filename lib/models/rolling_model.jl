@@ -250,6 +250,7 @@ end
 # the config switches between some different model options
 
 function build_for_hour(data, hour::Int, previous_hour_data)
+    error("Don't use this model. The rolling model with ramp rates includes important feed forward of storage SOC from the previous round.")
 
 	# create the optimisation model with HiGHS as the solver
 

@@ -145,7 +145,15 @@ function process_parameters!(m::Model, data::Dict{Symbol,Any},previous_hour_data
         m.ext[:parameters][:storage_power_capacity] = float(storage["powerCapacity"])
         m.ext[:parameters][:storage_efficiency] = float(storage["efficiency"])
         m.ext[:parameters][:storage_initial_soc] = haskey(previous_hour_data,:SOC) ? previous_hour_data[:SOC] : float(storage["initialSOC"]) * float(storage["energyCapacity"])
-        m.ext[:parameters][:storage_end_soc] = float(storage["endSOC"]) * float(storage["energyCapacity"])
+        
+        if haskey(storage, "useEndSOCRange") && storage["useEndSOCRange"]
+            m.ext[:parameters][:storage_end_soc_high] = float(storage["endSOCRange"][2]) * float(storage["energyCapacity"])
+            m.ext[:parameters][:storage_end_soc_low] = float(storage["endSOCRange"][1]) * float(storage["energyCapacity"])
+            m.ext[:parameters][:use_end_soc_range] = true
+        else
+            m.ext[:parameters][:storage_end_soc] = float(storage["endSOC"]) * float(storage["energyCapacity"])
+            m.ext[:parameters][:use_end_soc_range] = false
+        end
         m.ext[:parameters][:has_storage] = true
     else
         m.ext[:parameters][:has_storage] = false
@@ -200,7 +208,6 @@ function build_market_clearing!(m::Model, start_at_period::Int)
         Qdis = m.ext[:variables][:Qdis] = @variable(m, 0 <= Qdis[h in CH] <= P_cap)
         SOC = m.ext[:variables][:SOC] = @variable(m, 0 <= SOC[h in CH] <= E_cap)
         SOC_init = m.ext[:parameters][:storage_initial_soc]
-        SOC_end = m.ext[:parameters][:storage_end_soc]
     end
 
     # OBJECTIVE: maximise welfare (value of demand minus generation cost)
@@ -259,16 +266,23 @@ function build_market_clearing!(m::Model, start_at_period::Int)
         
         # State of charge dynamics: SOC[h] = SOC[h-1] + η*Qch[h] - Qdis[h]/η
         # For first hour h=start_at_period, use initial SOC
-        # TODO: this needs to be reworked so we can feed forward the SOC result from the previous round
+        #  feed forward the SOC result from the previous round
         println("constrain this storage to start at the initial SOC $SOC_init")
         @constraint(m, SOC[start_at_period] == SOC_init + η * Qch[start_at_period] - Qdis[start_at_period] / η)
         
+        # interperiod constraints for hours 2+
         for h in range(start_at_period + 1,(start_at_period -1)+length(CH))
             @constraint(m, SOC[h] == SOC[h-1] + η * Qch[h] - Qdis[h] / η)
         end
         
-        # Cyclic constraint: end where you started (optional, but good for daily optimization)
-        @constraint(m, SOC[start_at_period+length(CH) - 1] == SOC_end)
+        # Cyclic constraint: end at a specific SOC or within a range
+        # TODO: think about whether this would ever leave SOC not at low end of range (realize all the value in the storage) - maybe this is fixed by explicitly pricing the storage
+        if m.ext[:parameters][:use_end_soc_range]
+            @constraint(m, SOC[start_at_period+length(CH) - 1] <= m.ext[:parameters][:storage_end_soc_high])
+            @constraint(m, SOC[start_at_period+length(CH) - 1] >= m.ext[:parameters][:storage_end_soc_low])
+        else
+            @constraint(m, SOC[start_at_period+length(CH) - 1] == m.ext[:parameters][:storage_end_soc])
+        end
     end
 
     # Question: is there an explicit "you can't charge and discharge at the same timestep" constraint? Maybe this isn't needed explicitly.
@@ -291,7 +305,6 @@ function build_for_hour(data, hour::Int, previous_hour_data)
 
 	# create variables, constraints and objective, then solve
 	build_market_clearing!(m, hour)
-
 
 	return m
 end

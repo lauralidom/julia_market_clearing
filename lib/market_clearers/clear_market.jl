@@ -16,6 +16,7 @@ include("..\\plots\\plot_price_evolution.jl")
 include("..\\plots\\plot_generation_stack_rolling.jl")
 include("..\\plots\\plot_dispatch_changes_for_hour.jl")
 include("..\\plots\\plot_state_of_charge_rolling.jl")
+include("..\\plots\\plot_peak_generation_and_storage_use.jl")
 
 
 include("..\\helpers\\helper_model_results.jl")
@@ -83,8 +84,9 @@ function ClearRolling(data, with_ramps)
 
 	PlotPriceEvolution.plot(priceSets)
 	PlotGenerationStackRolling.plot(resultset)
-	PlotDispatchChangesForHour.plot(resultset,"Wind",18)
+	PlotDispatchChangesForHour.plot(resultset,"Peak",32)
 	PlotStateOfChargeRolling.plot(resultset)
+	PlotPeakGenerationAndStorageUse.plot(resultset)
 
 	#= TODO: fix these plots for the new rolling approach
 	    PlotMarketPricesWithStorage.plot(m)
