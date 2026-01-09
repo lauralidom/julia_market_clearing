@@ -1,6 +1,7 @@
 # general parameters
 
-nTimesteps: 24 # number of timesteps per representative day
+strategy: basic # strategy for clearing market
+nTimesteps: 24 # number of timesteps in input data
 
 
 # Generator parameters

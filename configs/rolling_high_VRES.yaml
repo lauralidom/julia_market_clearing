@@ -1,22 +1,29 @@
 # general parameters
 
-nTimesteps: 24 # number of timesteps per representative day
-
+strategy: rolling_with_ramps # strategy for clearing market
+nTimesteps: 24 # number of timesteps in input data
+clearForDays: 5 # number of days to clear market for
+clearingInterval: 1 # number of hours between market clearing/optimization rounds
+clearingWindow: 24 # number of hours to consider in each round
 
 # Generator parameters
 dispatchableGenerators:
  Base:
   bidPrice: 30 # EUR/MWh
   capacity: 1500 # MW
+  rampRate: 2 # % of nominal power per minute
+  initialQuantity: 1500
 
  Peak:
   bidPrice: 100 # EUR/MWh
   capacity: 700 # MW
+  rampRate: 12 # % of nominal power per minute
+  initialQuantity: 0
 
 variableGenerators:
   Wind:
     bidPrice: 0         # EUR/MWh
-    capacity: 1000        # MW
+    capacity: 2600        # MW
     # Low at night, strong in the afternoon/evening, length = 24
     profile: [
       0.20, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60,
@@ -25,7 +32,7 @@ variableGenerators:
     ]
   Solar:
     bidPrice: 0         # EUR/MWh
-    capacity: 600        # MW
+    capacity: 900        # MW
     # Zero at night, strong in the afternoon, length = 24
     profile: [
       0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10,
@@ -41,6 +48,8 @@ batteryStorage:
   efficiency: 0.9
   initialSOC: 0.5 # as fraction of energyCapacity
   endSOC: 0.5 # as fraction of energyCapacity
+  endSOCRange: [0.2,0.8] # acceptable range of end SOCs as a fraction of energyCapacity - but will it always shoot for the low end? maybe the energy in storage needs to be explicitly valued in the objective function?
+  useEndSOCRange: true # toggle between a set goal and an open range of acceptable end SOCs
 
 
 # Demand parameters

@@ -30,7 +30,16 @@ function load_input_data(path::String)
     return data
 end
 
-# Step 2a: create lists for the variables (sets)
+# Step 2a: create lists for the variables (sets) - note the !, we are modifying the model.
+
+#=
+    Why do we create sets here?
+    1. They are attached to the model via the ext (extension) dictionary.
+    2. They are (actually not) then used in step 2a as collections to iterate through in order to add even more to the model via m.ext for all of the timeseries data for bids over time.
+    3. They are used to create variables in the creation of the clearing model itself (Step 3).
+=#
+
+
 function define_sets!(m::Model, data::Dict{Symbol,Any})
     # Store all sets in a dedicated dictionary attached to the model
     m.ext[:sets] = Dict{Symbol,Any}()
@@ -45,17 +54,17 @@ function define_sets!(m::Model, data::Dict{Symbol,Any})
 
     # generators IG = list of all generator names (dispatchable + variable)
     IG = String[]
-    for g in keys(disp_gen)
+    for g in keys(disp_gen) # ["Base", "Peak"]
         push!(IG, String(g))
     end
-    for g in keys(var_gen)
+    for g in keys(var_gen) # ["Wind"]
         push!(IG, String(g))
     end
     m.ext[:sets][:IG] = IG
 
     # demand segments ID = list of all demand segment names (Base, Flex)
     ID = String[]
-    for d in keys(dem)
+    for d in keys(dem) # ["Base", "Flex"]
         push!(ID, String(d))
     end
     m.ext[:sets][:ID] = ID
@@ -69,8 +78,8 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
     var      = data[:variableGenerators]
     dem      = data[:demandSegments]
 
-    JH = m.ext[:sets][:JH]
-    IG = m.ext[:sets][:IG]
+    JH = m.ext[:sets][:JH] # JH is used
+    IG = m.ext[:sets][:IG] # i think that IG and ID are actually not used in this function - it's working from the YAML-based dict directly
     ID = m.ext[:sets][:ID]
 
     # generator prices P_gen and hourly maximum quantities Q_gen[g,h]
@@ -98,8 +107,10 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
         profile_any = gdata_any["profile"] # availability factors per hour
         profile = [float(x) for x in profile_any]
 
-        length(profile) == length(JH) || error("Profile for $g must have length $(length(JH)).")
+        length(profile) == length(JH) || error("Profile for $g must have length $(length(JH)).") # Note use of julia-style || as conditional here.
 
+
+        # This block modifies the capacity with the availability factor (profile) from the config
         for h in JH
             af = profile[h]                # availability factor in hour h
             Pr_gen[(g,h)] = P
@@ -118,7 +129,7 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
         q_any = ddata_any["quantity"]           # hourly max quantity
         q_vec = [float(x) for x in q_any]
 
-        length(q_vec) == length(JH) || error("Quantity vector for demand segment $d must have length $(length(JH)).")
+        length(q_vec) == length(JH) || error("Quantity vector for demand segment $d must have length $(length(JH)).") # Note use of julia-style || as conditional here.
 
         for h in JH
             Pr_dem[(d,h)] = P
@@ -137,7 +148,7 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any})
 end
 
 
-# Step 2c: scalar parameters
+# Step 2c: scalar parameters AKA add storage, at least for now. How will this change when storage actually bids as a market player? Likely they belong in the above bids, but they're more complex, b/c for example they can't charge and discharge at the same time.
 function process_parameters!(m::Model, data::Dict{Symbol,Any})
     
     m.ext[:parameters] = Dict{Symbol,Any}()
@@ -205,16 +216,16 @@ function build_market_clearing!(m::Model)
 
     # energy balance: in each hour, total generation equals total served demand
     #if storage, add storage charging/discharging
-     if has_storage
+    if has_storage
         m.ext[:constraints][:energy_balance] = @constraint(
             m, [h in JH],
             sum(Qg[g,h] for g in IG) + Qdis[h] - Qch[h] - sum(Qd[d,h] for d in ID) == 0
         )
     else
-    m.ext[:constraints][:energy_balance] = @constraint(
-        m, [h in JH],
-        sum(Qg[g,h] for g in IG) - sum(Qd[d,h] for d in ID) == 0
-    )
+        m.ext[:constraints][:energy_balance] = @constraint(
+            m, [h in JH],
+            sum(Qg[g,h] for g in IG) - sum(Qd[d,h] for d in ID) == 0
+        )
     end
 
     # generator limits: generation cannot exceed available capacity Q_gen[g,h]
@@ -244,6 +255,8 @@ function build_market_clearing!(m::Model)
         # Cyclic constraint: end where you started (optional, but good for daily optimization)
         @constraint(m, SOC[end] == 0)
     end
+
+    # Question: is there an explicit "you can't charge and discharge at the same timestep" constraint? Maybe this isn't needed explicitly.
 
     return m
 end
@@ -282,7 +295,7 @@ end
 JH = m.ext[:sets][:JH]
 λ  = dual.(m.ext[:constraints][:energy_balance])   # hourly prices [EUR/MWh]
 
-hours  = collect(JH)
+hours  = collect(JH)  # collect https://docs.julialang.org/en/v1/base/collections/#Base.collect-Tuple%7BAny%7D - unclear to me why this is needed
 prices = [λ[h] for h in JH]
 
 # Dispatch check for any hour, to print
