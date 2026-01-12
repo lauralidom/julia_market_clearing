@@ -38,7 +38,7 @@ data = load_input_data("input_data_rolling.yaml")
 # Load and expand time series for entire simulation
 Pr_gen_full, Q_gen_full, Pr_dem_full, Q_dem_full = load_and_expand_timeseries(cfg, total_hours)
 
-# Initialize sets and parameters (stay same across all windows)
+# Initialise sets and parameters (stay same across all windows)
 m_fixed = Model(HiGHS.Optimizer)
 define_sets!(m_fixed, data)
 IG = m_fixed.ext[:sets][:IG]
@@ -49,7 +49,6 @@ all_results = Dict{Symbol,Any}()
 all_results[:clearing_times] = Int[]                        # Global hour of each clearing
 all_results[:prices] = Dict{Int, Vector{Float64}}()         # prices[clearing] = [λ per hour]
 all_results[:dispatch] = Dict{Int, Dict}()                  # dispatch[clearing][generator] = g_planned values
-all_results[:infeasible_clearings] = Int[]                  # which clearings were infeasible
 
 # Detailed clearing data for analysis
 all_results[:clearing_details] = Dict{Int, Dict}()
@@ -63,8 +62,9 @@ for g in IG
     end
 end
 
-# Initialise storage state across windows
-storage_soc_carryover = 0.0  # updated each clearing
+# Initialise storage state across windows from input
+storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["batteryStorage"]["energyCapacity"])
+
 
 #Initialise dictionary to hold locked hour wind availability
 var_gen = cfg["variableGenerators"]
@@ -139,13 +139,6 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     m.ext[:timeseries][:Q_dem] = Q_dem_window
     m.ext[:timeseries][:Q_prev] = Q_prev
     
-    # Ensure no NaN values in Q_prev (from infeasible solutions)
-    for key in keys(Q_prev)
-        if isnan(Q_prev[key])
-            Q_prev[key] = 0.0
-        end
-    end
-    
     # Process parameters
     process_parameters!(m, data)
     
@@ -157,14 +150,7 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     optimize!(m)
     
     status = termination_status(m)
-    if status != OPTIMAL
-        println("[WARNING] Non-optimal: $status")
-        push!(all_results[:infeasible_clearings], clearing_count)
-        # Skip this clearing if infeasible - keep previous commitments
-        continue
-    else
-        println("Optimal")
-    end
+    @assert status == OPTIMAL "Optimization failed with status: $status"
     
     # Extract results
     q_val = value.(m.ext[:variables][:q])           # adjustment variable
@@ -174,48 +160,6 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     # Extract prices (dual variables of energy balance)
     λ = dual.(m.ext[:constraints][:energy_balance])
     
-    # DEBUG: Print generation and demand for local hours 1 and 2
-    if clearing_count <= 3  # Only print for first few clearings
-        global_h1 = current_hour
-        global_h2 = current_hour + 1
-        
-        println("  Local h=1 (Global hour $global_h1) - LOCKED:")
-        for g in IG
-            gen_val = g_planned_val[g, 1]
-            q_prev_val = m.ext[:timeseries][:Q_prev][(String(g), 1)]
-            q_adj = q_val[g, 1]
-            println("    $g: q_prev=$(round(q_prev_val; digits=1)), q=$(round(q_adj; digits=1)), g_planned=$(round(gen_val; digits=1)) MW")
-        end
-        # Print demand by segment (base + flex)
-        demand_base_h1 = Qd_val["Base", 1]
-        demand_flex_h1 = Qd_val["Flex", 1]
-        total_demand = demand_base_h1 + demand_flex_h1
-        total_gen = sum(g_planned_val[g, 1] for g in IG)
-        println("  Total Demand: Base=$(round(demand_base_h1; digits=1)) MW + Flex=$(round(demand_flex_h1; digits=1)) MW = $(round(total_demand; digits=1)) MW | Total Generation: $(round(total_gen; digits=1)) MW")
-        # Print battery charge/discharge
-        Qch_val = value.(m.ext[:variables][:Qch])
-        Qdis_val = value.(m.ext[:variables][:Qdis])
-        println("  Battery: Charge=$(round(Qch_val[1]; digits=1)) MW, Discharge=$(round(Qdis_val[1]; digits=1)) MW")
-        
-        println("  Local h=2 (Global hour $global_h2) - FLEXIBLE:")
-        for g in IG
-            gen_val = g_planned_val[g, 2]
-            q_prev_val = m.ext[:timeseries][:Q_prev][(String(g), 2)]
-            q_adj = q_val[g, 2]
-            println("    $g: q_prev=$(round(q_prev_val; digits=1)), q=$(round(q_adj; digits=1)), g_planned=$(round(gen_val; digits=1)) MW")
-        end
-        # Print demand by segment (base + flex)
-        demand_base_h2 = Qd_val["Base", 2]
-        demand_flex_h2 = Qd_val["Flex", 2]
-        total_demand_h2 = demand_base_h2 + demand_flex_h2
-        total_gen_h2 = sum(g_planned_val[g, 2] for g in IG)
-        price_h2 = round(λ[2]; digits=2)
-        println("  Total Demand: Base=$(round(demand_base_h2; digits=1)) MW + Flex=$(round(demand_flex_h2; digits=1)) MW = $(round(total_demand_h2; digits=1)) MW | Total Generation: $(round(total_gen_h2; digits=1)) MW | Price: $price_h2 €/MWh")
-        # Print battery charge/discharge
-        Qch_val = value.(m.ext[:variables][:Qch])
-        Qdis_val = value.(m.ext[:variables][:Qdis])
-        println("  Battery: Charge=$(round(Qch_val[2]; digits=1)) MW, Discharge=$(round(Qdis_val[2]; digits=1)) MW")
-    end
     prices_window = [λ[h] for h in 1:look_ahead]
     
     # Extract battery variables for storage
@@ -247,22 +191,84 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     
     # Storage state continuity: pass executed hour SOC to next clearing
     SOC_val = value.(m.ext[:variables][:SOC])
-    storage_soc_carryover = SOC_val[1]  # SOC after executing hour 1 (the only realized hour)
+    storage_soc_carryover = SOC_val[1]  # SOC after executing hour 1 (the only realised hour)
     
-    # Print clearing summary
-    λ_h1 = round(prices_window[1]; digits=2)
-    soc_display = round(storage_soc_carryover; digits=1)
-    println("Price: $λ_h1 €/MWh | Storage SOC: $soc_display MWh")
+    # KIND OF COMPLICATED LOGIC FOR PRINTING THE PRICE SETTER
+    # Executed-hour (h=1) summary
+    h = 1
+    λ_h1 = round(prices_window[h]; digits=2)
+    if λ_h1 == -0.0
+        λ_h1 = 0.0
+    end
+
+    P_cap = m.ext[:parameters][:storage_power_capacity]
+    E_cap = m.ext[:parameters][:storage_energy_capacity]
+
+    Qch_val  = value.(m.ext[:variables][:Qch])
+    Qdis_val = value.(m.ext[:variables][:Qdis])
+    SOC_val  = value.(m.ext[:variables][:SOC])
+
+    soc_end = round(SOC_val[h]; digits=1)
+
+    println("Price h=1: $λ_h1 €/MWh | SOC_end: $soc_end MWh | Ch=$(round(Qch_val[h]; digits=1)) | Dis=$(round(Qdis_val[h]; digits=1))")
+
+    # Detailed diagnostics for first 3 clearings
+    if clearing_count <= 3
+        price_setters = String[]
+
+        # 1) Flex marginal?
+        flex_cap = m.ext[:timeseries][:Q_dem][("Flex", h)]
+        flex_served = Qd_val["Flex", h]
+        if flex_served > 0 && flex_served < flex_cap
+            push!(price_setters, "Flex (marginal, bid=50)")
+        end
+
+        # 2) Any generator marginal?
+        for g in ["Wind", "Base", "Peak"]
+            if g in IG
+                cap = m.ext[:timeseries][:Q_gen][(g, h)]
+                disp = g_planned_val[g, h]
+                if disp > 0 && disp < cap
+                    bid = m.ext[:timeseries][:Pr_gen][(g, h)]
+                    push!(price_setters, "$g (marginal, bid=$(round(bid; digits=1)))")
+                end
+            end
+        end
+
+        # 3) Storage marginal?
+        # Charging marginal if charging >0 and not at cap and SOC not at upper bound
+        if Qch_val[h] > 0 && Qch_val[h] < P_cap && SOC_val[h] < E_cap
+            push!(price_setters, "Storage charging (marginal)")
+        end
+        # Discharging marginal if discharging >0 and not at cap and SOC not at lower bound
+        if Qdis_val[h] > 0 && Qdis_val[h] < P_cap && SOC_val[h] > 0
+            push!(price_setters, "Storage discharging (marginal)")
+        end
+
+        if isempty(price_setters)
+            println("  Price setter: none clearly marginal (likely a binding constraint / corner solution).")
+        else
+            println("  Price setter: " * join(price_setters, " | "))
+        end
+
+        # Print key positions
+        for g in ["Wind", "Base", "Peak"]
+            if g in IG
+                cap = m.ext[:timeseries][:Q_gen][(g, h)]
+                qh  = round(q_val[g, h]; digits=1)
+                gp  = round(g_planned_val[g, h]; digits=1)
+                println("  $g: cap=$(round(cap; digits=1)) q=$(qh) g_planned=$(gp)")
+            end
+        end
+
+        # Flex status
+        println("  Flex: served=$(round(flex_served; digits=1)) / cap=$(round(flex_cap; digits=1))")
+    end
 end
 
 println()
 println("Simulation Complete")
 println("Total clearings: $clearing_count")
-if !isempty(all_results[:infeasible_clearings])
-    println("INFEASIBLE CLEARINGS: $(join(all_results[:infeasible_clearings], ", "))")
-else
-    println("All clearings optimal")
-end
 println()
 
 # Summary statistics - collect all prices from all clearings

@@ -95,7 +95,7 @@ function plot_rolling_horizon_results(all_results::Dict)
     # Create new p3: Wind generation evolution across feasible clearings
     # Each clearing line shows its 24-hour wind forecast from its perspective
     p3 = plot(xlabel="Global Hour (Simulation)", ylabel="Wind Generation (MW)",
-              title="Wind Generation Forecasts - Rolling Horizon Evolution (Feasible Clearings Only)",
+              title="Wind Generation Forecasts - Rolling Horizon Evolution",
               legend=:topright, linewidth=2)
     
     # Get feasible clearing numbers in order
