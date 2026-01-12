@@ -2,26 +2,26 @@ module ClearMarket
 
 using JuMP
 
-include("..\\models\\basic_model.jl")
-include("..\\models\\rolling_model.jl")
-include("..\\models\\rolling_model_with_ramp_rates.jl")
+include("../models/basic_model.jl")
+include("../models/rolling_model.jl")
+include("../models/rolling_model_with_ramp_rates.jl")
 
-include("..\\plots\\plot_hourly_market_equilibrium.jl")
-include("..\\plots\\plot_market_prices_with_storage.jl")
-include("..\\plots\\plot_state_of_charge.jl")
-include("..\\plots\\plot_generation_stack.jl")
+include("../plots/plot_hourly_market_equilibrium.jl")
+include("../plots/plot_market_prices_with_storage.jl")
+include("../plots/plot_state_of_charge.jl")
+include("../plots/plot_generation_stack.jl")
 
 # rolling plots
-include("..\\plots\\plot_price_evolution.jl")
-include("..\\plots\\plot_generation_stack_rolling.jl")
-include("..\\plots\\plot_dispatch_changes_for_hour.jl")
-include("..\\plots\\plot_state_of_charge_rolling.jl")
-include("..\\plots\\plot_peak_generation_and_storage_use.jl")
+include("../plots/plot_price_evolution.jl")
+include("../plots/plot_generation_stack_rolling.jl")
+include("../plots/plot_dispatch_changes_for_hour.jl")
+include("../plots/plot_state_of_charge_rolling.jl")
+include("../plots/plot_peak_generation_and_storage_use.jl")
 
 
-include("..\\helpers\\helper_model_results.jl")
+include("../helpers/helper_model_results.jl")
 
-include("..\\output_data\\process_data.jl")
+include("../output_data/process_data.jl")
 
 
 function ClearBasic(data)

@@ -4,7 +4,7 @@ using Plots
 using JuMP
 using Statistics
 
-include("..\\output_data\\process_data.jl")
+include("../output_data/process_data.jl")
 
 function plot(resultset, generator, hour)
 

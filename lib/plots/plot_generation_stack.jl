@@ -4,7 +4,7 @@ using Plots
 using JuMP
 using Statistics
 
-include("..\\helpers\\helper_model_results.jl")
+include("../helpers/helper_model_results.jl")
 
 function plot(m::Model)
 

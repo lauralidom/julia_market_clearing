@@ -4,6 +4,8 @@
 using JuMP
 using YAML
 
+include("../../lib/helpers/helper_input_data.jl")
+
 # 0: Load Input Data from YAML
 function load_input_data(path::String)
     # Read the YAML file into a nested Julia Dict/Array structure
@@ -176,6 +178,7 @@ function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, noise_std::Floa
         if g in IG
             Q = float(gdata_any["capacity"])
             
+            #=
             for h in 1:window_length
                 # Skip hour 1 (locked hour) - no noise to maintain feasibility
                 if h == 1
@@ -191,6 +194,14 @@ function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, noise_std::Floa
                 
                 Q_gen_window[(g, h)] = Q * new_af
             end
+            =#
+
+            # reimplementation of noise
+
+            first_hour = 2
+            last_hour = window_length
+            HelperInputData.add_noise!(Q_gen_window, g, Q, noise_std, first_hour, last_hour)
+
         end
     end
 end

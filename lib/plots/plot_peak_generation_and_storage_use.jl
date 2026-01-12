@@ -4,7 +4,7 @@ using Plots
 using JuMP
 using Statistics
 
-include("..\\output_data\\process_data.jl")
+include("../output_data/process_data.jl")
 
 # TODO: This is still the old generation stack graph, but should have all the right data
 

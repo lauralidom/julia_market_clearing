@@ -3,7 +3,7 @@ module ProcessData
 using Dates, JuMP, MathOptInterface
 
 
-include("..\\helpers\\helper_model_results.jl")
+include("../helpers/helper_model_results.jl")
 
 # this struct holds the incoming data in a standard format
 
