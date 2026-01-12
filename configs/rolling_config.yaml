@@ -5,6 +5,7 @@ nTimesteps: 24 # number of timesteps in input data
 clearForDays: 5 # number of days to clear market for
 clearingInterval: 1 # number of hours between market clearing/optimization rounds
 clearingWindow: 24 # number of hours to consider in each round
+storageValue: 50 # experiment: value of stored MWh at end of window in objective function
 
 # Generator parameters
 dispatchableGenerators:
@@ -43,8 +44,8 @@ variableGenerators:
 
 # Storage parameters
 batteryStorage:
-  energyCapacity: 800 # MWh
-  powerCapacity: 400 # MW
+  energyCapacity: 2800 # MWh
+  powerCapacity: 1400 # MW
   efficiency: 0.9
   initialSOC: 0.5 # as fraction of energyCapacity
   endSOC: 0.5 # as fraction of energyCapacity

@@ -165,6 +165,8 @@ function process_parameters!(m::Model, data::Dict{Symbol,Any},previous_hour_data
         m.ext[:parameters][:ramp_rate][g] = float(max(gen_config["rampRate"] *.01 * 60 * gen_config["capacity"], gen_config["capacity"]))
         m.ext[:parameters][:previous_hour_dispatch][g] = previous_hour_data[:Q_gen][g]
     end
+
+    m.ext[:parameters][:storage_value] = data[:storageValue]
     
     return m
 end
@@ -213,6 +215,7 @@ function build_market_clearing!(m::Model, start_at_period::Int)
     # OBJECTIVE: maximise welfare (value of demand minus generation cost)
     # sum_d,h P_dem(d) * Qd[d,h]  -  sum_g,h P_gen(g,h) * Qg[g,h]
     m.ext[:objective] = @objective(m, Max,
+        (m.ext[:parameters][:storage_value] * SOC[CH[length(CH)]]) + # note this line add a valuation to the stored energy at the end of the window - just a preset parameter for now
         sum(Pr_dem[(String(d),h)] * Qd[d,h] for d in ID, h in CH) -
         sum(Pr_gen[(String(g),h)] * Qg[g,h] for g in IG, h in CH)
     )

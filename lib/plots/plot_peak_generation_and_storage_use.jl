@@ -40,13 +40,12 @@ function plot(resultset)
         labels = stack_order
     end
 
-    charge_matrix = zeros(length(stack_order), length(hours))
+    charge_matrix = zeros(0, length(hours))
     charge_labels = ["Storage Charge"]
     # Add storage charge row
     charge_vec = [-1*Qch_val[h] for h in hours]
     
     charge_matrix = vcat(charge_matrix, charge_vec')
-    charge_labels = []
 
     # Calculate max y for limits
     total_demand = [sum(d[h] for (_,d) in dem_data) for h in hours]
@@ -56,7 +55,7 @@ function plot(resultset)
     p3 = Plots.plot(xlabel="Hour", ylabel="Power (MW)",
             title="Peak Generation and Storage Stack",
             legend=:topright,
-            ylims=(0, max_y),size=(1200,1200))
+            ylims=(-.5*max_y, max_y),size=(1200,1200))
 
     # Stack manually using areaplot with seriestype
     for i in 1:size(stack_matrix, 1)
@@ -78,7 +77,7 @@ function plot(resultset)
         if i == 1
             Plots.plot!(p3, hours, charge_matrix[i, :],
                 fillrange=0, label=charge_labels[i], 
-                color=gen_colors[len(gen_colors) -1], alpha=0.8, linewidth=0)
+                color=gen_colors[length(gen_colors) - 1], alpha=0.8, linewidth=0)
         else
             cumsum_prev = vec(sum(charge_matrix[1:i-1, :], dims=1))
             cumsum_curr = vec(sum(charge_matrix[1:i, :], dims=1))
@@ -89,7 +88,7 @@ function plot(resultset)
     end
 
     # Add demand line on top
-    Plots.plot!(p3, hours, total_demand .+ charging_vec,
+    Plots.plot!(p3, hours, total_demand .+ charge_vec,
         label="Demand + Charging", color=:black, lw=3, ls=:dash)
     
     display(p3)
