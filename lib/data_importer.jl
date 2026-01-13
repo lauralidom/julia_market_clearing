@@ -25,6 +25,7 @@ function load_input_data(path::String)
         data[:clearingInterval] = Int(cfg["clearingInterval"])
         data[:clearingWindow] = Int(cfg["clearingWindow"])
         data[:storageValue] = Int(cfg["storageValue"]) # experiment: value of stored MWh at end of window in objective function
+        data[:noiseLevel] = float(cfg["noiseLevel"])
     end
 
     # generators: separate blocks for dispatchable and variable generators
