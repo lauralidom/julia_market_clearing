@@ -63,6 +63,16 @@ function GetPriceSets(resultset)
 	return pricesets
 end
 
+
+function GeneratorQuantityBidSets(resultset, generator)
+	bidsets = []
+	for result in resultset
+		bidset = (result.BaseHour,result.GenData[generator])
+		push!(bidsets,bidset)
+	end
+	return bidsets
+end
+
 #= TODO
 	hours = ProcessData.Hours(resultset)
 	gen_data = ProcessData.GenData(resultset)
@@ -151,6 +161,7 @@ function StorageStateOfChargeOutcomes(resultset)
 	end
 	return SOC_data
 end
+
 
 # todo: maybe a write to csv or similar to have "raw" data to work with
 

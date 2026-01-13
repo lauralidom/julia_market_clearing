@@ -6,8 +6,6 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-# TODO: This is still the old generation stack graph, but should have all the right data
-
 function plot(resultset)
 
 	hours = ProcessData.Hours(resultset)
