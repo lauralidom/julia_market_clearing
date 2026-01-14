@@ -102,7 +102,7 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any}, start_at_pe
             Pr_gen[(g,h)] = P
             Q_gen[(g,h)]  = Q * af         # available capacity = Q * profile[h]
         end
-        
+
         if haskey(data,:noiseLevel) && data[:noiseLevel] > 0
             noise_std = float(data[:noiseLevel]) 
             HelperInputData.add_noise!(Q_gen, g, Q, noise_std, CH[1], CH[length(CH)])
@@ -309,7 +309,7 @@ function build_for_hour(data, hour::Int, previous_hour_data)
 	# create the optimisation model with HiGHS as the solver
 
     m = Model(HiGHS.Optimizer)
-
+    set_silent(m)
 	# build the sets, time series and parameters based on the YAML data
 	define_sets!(m, data, hour)
 	process_time_series_data!(m, data, hour)
