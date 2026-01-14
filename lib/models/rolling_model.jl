@@ -249,7 +249,7 @@ end
 
 # the config switches between some different model options
 
-function build_for_hour(data, hour::Int, previous_hour_data)
+function build_for_time_period(data, time_period::Int, previous_time_period_data)
     error("Don't use this model. The rolling model with ramp rates includes important feed forward of storage SOC from the previous round.")
 
 	# create the optimisation model with HiGHS as the solver
@@ -257,12 +257,12 @@ function build_for_hour(data, hour::Int, previous_hour_data)
     m = Model(HiGHS.Optimizer)
 
 	# build the sets, time series and parameters based on the YAML data
-	define_sets!(m, data, hour)
-	process_time_series_data!(m, data, hour)
+	define_sets!(m, data, time_period)
+	process_time_series_data!(m, data, time_period)
 	process_parameters!(m, data)
 
 	# create variables, constraints and objective, then solve
-	build_market_clearing!(m, hour)
+	build_market_clearing!(m, time_period)
 
 
 	return m

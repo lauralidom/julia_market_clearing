@@ -9,10 +9,10 @@ include("../helpers/helper_model_results.jl")
 
 mutable struct ClearingData
 	Timestamp::DateTime
-	BaseHour::Int
+	BaseTimePeriod::Int
 	TerminationStatus::MathOptInterface.TerminationStatusCode
 	ObjectiveValue::Number
-	Hours::Vector{Int}
+	TimePeriods::Vector{Int}
 	Prices::Vector{Number}
 	GenData::Dict{String, Vector{Float64}}
 	BidPrices::Dict{String, Vector{Float64}} # only gens for now
@@ -32,15 +32,15 @@ end
 
 # this function adds results to the result set
 
-function AddToResultSet!(resultset, model, hour)
+function AddToResultSet!(resultset, model, time_period)
 	cd = ClearingData()
 	cd.Timestamp = Dates.now()
-	cd.BaseHour = hour
+	cd.BaseTimePeriod = time_period
 	# todo, add some actual data
 
 	cd.TerminationStatus = termination_status(model)
 	cd.ObjectiveValue = objective_value(model)
-	cd.Hours = HelperModelResults.Hours(model)
+	cd.TimePeriods = HelperModelResults.TimePeriods(model)
 	cd.Prices = HelperModelResults.Prices(model)
 	cd.BidPrices = HelperModelResults.BidPrices(model)
 	cd.GenData = HelperModelResults.GenData(model)
@@ -57,7 +57,7 @@ end
 function GetPriceSets(resultset)
 	pricesets = []
 	for result in resultset
-		priceset = (result.BaseHour,result.Prices)
+		priceset = (result.BaseTimePeriod,result.Prices)
 		push!(pricesets,priceset)
 	end
 	return pricesets
@@ -67,28 +67,20 @@ end
 function GeneratorQuantityBidSets(resultset, generator)
 	bidsets = []
 	for result in resultset
-		bidset = (result.BaseHour,result.GenData[generator])
+		bidset = (result.BaseTimePeriod,result.GenData[generator])
 		push!(bidsets,bidset)
 	end
 	return bidsets
 end
 
-#= TODO
-	hours = ProcessData.Hours(resultset)
-	gen_data = ProcessData.GenData(resultset)
-    dem_data = ProcessData.DemandData(resultset)
-	Qdis_val = ProcessData.StorageDischargeQuantities(resultset)
-	Qch_val = ProcessData.StorageChargeQuantities(resultset)
-=#
+# I am disliking how the storage here is just implying the time periods heuristically - would be better to be explicit
 
-# I am disliking how the storage here is just implying the hours heuristically - would be better to be explicit
-
-function Hours(resultset)
-	hours = []
+function TimePeriods(resultset)
+	time_periods = []
 	for result in resultset
-		push!(hours,result.BaseHour)
+		push!(time_periods,result.BaseTimePeriod)
 	end
-	return hours
+	return time_periods
 end
 
 function GenData(resultset)
@@ -98,27 +90,27 @@ function GenData(resultset)
 	end
 	for result in resultset
 		for key in keys(result.GenData)
-			push!(gen_data[key], result.GenData[key][1]) # only getting the gen data for this base hour - fully cleared final dispatch
+			push!(gen_data[key], result.GenData[key][1]) # only getting the gen data for this base time period - fully cleared final dispatch
 		end
 	end
 	return gen_data
 end
 
 
-function BidPricesForHour(resultset, generator, hour)
+function BidPricesForTimePeriod(resultset, generator, time_period)
 	bid_prices = Dict{Int,Float64}()
 	for result in resultset
-		hour - result.BaseHour > 0 && hour - result.BaseHour <= length(result.BidPrices[generator]) ? bid_prices[result.BaseHour] =  result.BidPrices[generator][hour - result.BaseHour] : continue
+		time_period - result.BaseTimePeriod > 0 && time_period - result.BaseTimePeriod <= length(result.BidPrices[generator]) ? bid_prices[result.BaseTimePeriod] =  result.BidPrices[generator][time_period - result.BaseTimePeriod] : continue
 	end
 	return bid_prices
 end
 
 
-function GenDispatchDataForHour(resultset, generator, hour) 
+function GenDispatchDataForTimePeriod(resultset, generator, time_period) 
 	gen_data = Dict{Int,Tuple{Float64,Float64}}()
 	for result in resultset
-		hoursAhead = hour - result.BaseHour
-		hoursAhead > 0 && hoursAhead <= length(result.GenData[generator]) ? gen_data[result.BaseHour] = (result.GenData[generator][hoursAhead], result.Prices[hoursAhead]) : continue	
+		tAhead = time_period - result.BaseTimePeriod
+		tAhead > 0 && tAhead <= length(result.GenData[generator]) ? gen_data[result.BaseTimePeriod] = (result.GenData[generator][tAhead], result.Prices[tAhead]) : continue	
 	end
 	return gen_data
 end
@@ -131,7 +123,7 @@ function DemandData(resultset)
 	end
 	for result in resultset
 		for key in keys(result.DemandData)
-			push!(demand_data[key], result.DemandData[key][1]) # only getting the demand data for this base hour - fully cleared final dispatch
+			push!(demand_data[key], result.DemandData[key][1]) # only getting the demand data for this base time period - fully cleared final dispatch
 		end
 	end
 	return demand_data
@@ -140,7 +132,7 @@ end
 function StorageDischargeQuantities(resultset)
 	storage_data = Vector{Float64}()
 	for result in resultset
-		push!(storage_data, result.StorageDischargeQuantities[1]) # only getting the discharge quantity for this base hour - fully cleared final dispatch
+		push!(storage_data, result.StorageDischargeQuantities[1]) # only getting the discharge quantity for this base time period - fully cleared final dispatch
 	end
 	return storage_data
 end
@@ -148,7 +140,7 @@ end
 function StorageChargeQuantities(resultset)
 	storage_data = Vector{Float64}()
 	for result in resultset
-		push!(storage_data, result.StorageChargeQuantities[1]) # only getting the charge quantity for this base hour - fully cleared final dispatch
+		push!(storage_data, result.StorageChargeQuantities[1]) # only getting the charge quantity for this base time period - fully cleared final dispatch
 	end
 	return storage_data
 end
@@ -157,7 +149,7 @@ end
 function StorageStateOfChargeOutcomes(resultset)
 	SOC_data = Vector{Float64}()
 	for result in resultset
-		push!(SOC_data, result.StorageStateOfCharge[1]) # only getting the SOC for this base hour - fully cleared final result
+		push!(SOC_data, result.StorageStateOfCharge[1]) # only getting the SOC for this base time period - fully cleared final result
 	end
 	return SOC_data
 end

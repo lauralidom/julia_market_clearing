@@ -4,7 +4,7 @@ using Plots
 using JuMP
 using Statistics
 
-function plot(m::Model, h::Int)
+function plot(m::Model, t::Int)
     # Extract the necessary data
     Pr_gen = m.ext[:timeseries][:Pr_gen]
     Q_gen  = m.ext[:timeseries][:Q_gen]
@@ -14,20 +14,20 @@ function plot(m::Model, h::Int)
     IG = m.ext[:sets][:IG]
     ID = m.ext[:sets][:ID]
 
-    # Collect generator (supply) data for hour h
+    # Collect generator (supply) data for time period t
     supply_prices = Float64[]
     supply_quantities = Float64[]
     for g in IG
-        push!(supply_prices, Pr_gen[(g, h)])
-        push!(supply_quantities, Q_gen[(g, h)])
+        push!(supply_prices, Pr_gen[(g, t)])
+        push!(supply_quantities, Q_gen[(g, t)])
     end
 
-    # Collect demand data for hour h
+    # Collect demand data for time period t
     demand_prices = Float64[]
     demand_quantities = Float64[]
     for d in ID
-        push!(demand_prices, Pr_dem[(d, h)])
-        push!(demand_quantities, Q_dem[(d, h)])
+        push!(demand_prices, Pr_dem[(d, t)])
+        push!(demand_quantities, Q_dem[(d, t)])
     end
 
     # Sort supply by price (ascending - merit order)
@@ -68,7 +68,7 @@ function plot(m::Model, h::Int)
     
     # Plot
     p = Plots.plot(xlabel="Quantity (MW)", ylabel="Price (EUR/MWh)", 
-             title="Market Equilibrium - Hour $h", legend=:best, 
+             title="Market Equilibrium - Time Period $t", legend=:best, 
              xlims = (0, maximum([supply_x; demand_x])), 
              ylims = (0, maximum([supply_y; demand_y]) * 1.05))
     

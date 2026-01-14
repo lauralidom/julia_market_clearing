@@ -13,7 +13,7 @@ function load_input_data(path::String)
     # Internal data dictionary that we pass to the other functions
     data = Dict{Symbol,Any}()
 
-    # time: number of hours in the representative day
+    # time: number of time periods (timesteps) in the input data
     T = Int(cfg["nTimesteps"])
     data[:T] = T
 
@@ -22,6 +22,7 @@ function load_input_data(path::String)
 
     if data[:strategy] != "basic"
         data[:clearForDays] = Int(cfg["clearForDays"])
+        data[:timePeriodsPerDay] = Int(cfg["timePeriodsPerDay"]) # number of time periods (timesteps) in each day
         data[:clearingInterval] = Int(cfg["clearingInterval"])
         data[:clearingWindow] = Int(cfg["clearingWindow"])
         data[:storageValue] = Int(cfg["storageValue"]) # experiment: value of stored MWh at end of window in objective function

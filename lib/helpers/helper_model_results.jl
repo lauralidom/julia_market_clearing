@@ -2,32 +2,26 @@ module HelperModelResults
 
 using JuMP
 
-#=
-	hours = HelperModelResults.Hours(m)
-	prices = HelperModelResults.Prices(m)
-	Qch_val = HelperModelResults.StorageChargeQuantities(m)
-	Qdis_val = HelperModelResults.StorageDischargeQuantities(m)
-=#
 
-function Hours(m::Model)
-	# return the hours cleared in this model
+function TimePeriods(m::Model)
+	# return the time periods cleared in this model
 	CH = m.ext[:sets][:CH]
 	return collect(CH)  # collect https://docs.julialang.org/en/v1/base/collections/#Base.collect-Tuple%7BAny%7D - unclear to me why this is needed
 end
 
 function Prices(m::Model)
-	# compute hourly market-clearing prices as duals of the energy balance constraints
+	# compute market-clearing prices for each time period as duals of the energy balance constraints
 	CH = m.ext[:sets][:CH]
 	λ  = dual.(m.ext[:constraints][:energy_balance])   # hourly prices [EUR/MWh]
 	return [λ[h] for h in CH]
 end
 
 function BidPrices(m)
-	hours = Hours(m)
+	time_periods = TimePeriods(m)
 	IG = m.ext[:sets][:IG]
     bid_prices = Dict{String, Vector{Float64}}()
     for g in IG
-        bid_prices[g] = [value(m.ext[:timeseries][:Pr_gen][g,h]) for h in hours]
+        bid_prices[g] = [value(m.ext[:timeseries][:Pr_gen][g,t]) for t in time_periods]
     end
     return bid_prices
 end
@@ -57,22 +51,22 @@ function SOCValues(m)
 end
 
 function GenData(m)
-	hours = Hours(m)
+	time_periods = TimePeriods(m)
 	IG = m.ext[:sets][:IG]
     gen_data = Dict{String, Vector{Float64}}()
     for g in IG
-        gen_data[g] = [value(m.ext[:variables][:Qg][g,h]) for h in hours]
+        gen_data[g] = [value(m.ext[:variables][:Qg][g,t]) for t in time_periods]
     end
     return gen_data
 end
 
 
 function DemandData(m)
-	hours = Hours(m)
+	time_periods = TimePeriods(m)
 	ID = m.ext[:sets][:ID]
     dem_data = Dict{String, Vector{Float64}}()
     for d in ID
-        dem_data[d] = [value(m.ext[:variables][:Qd][d,h]) for h in hours]
+        dem_data[d] = [value(m.ext[:variables][:Qd][d,t]) for t in time_periods]
     end
     return dem_data
 end

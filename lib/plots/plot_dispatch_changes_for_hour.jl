@@ -6,20 +6,20 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-function plot(resultset, generator, hour)
+function plot(resultset, generator, time_period)
 
-	hours = ProcessData.Hours(resultset)
-	gen_data = ProcessData.GenDispatchDataForHour(resultset, generator, hour)
-	bid_prices = ProcessData.BidPricesForHour(resultset, generator, hour)
+	time_periods = ProcessData.TimePeriods(resultset)
+	gen_data = ProcessData.GenDispatchDataForTimePeriod(resultset, generator, time_period)
+	bid_prices = ProcessData.BidPricesForTimePeriod(resultset, generator, time_period)
 	total_revenue = 0
-    # for (hour, (quantity, price)) in gen_data
-    for h in hours
-    	if haskey(gen_data,h)
-    		(quantity, price) = gen_data[h]
+    # for (time_period, (quantity, price)) in gen_data
+    for t in time_periods
+    	if haskey(gen_data,t)
+    		(quantity, price) = gen_data[t]
     		change_text = ""
     		(prev_quantity, prev_price) = (0.0,0.0)
-    		if haskey(gen_data, h - 1)
-    			(prev_quantity, prev_price) = gen_data[h - 1]
+    		if haskey(gen_data, t - 1)
+    			(prev_quantity, prev_price) = gen_data[t - 1]
     		end
 			if quantity != prev_quantity
 				revenue_change = (quantity - prev_quantity) * price
@@ -27,16 +27,16 @@ function plot(resultset, generator, hour)
 				total_revenue += revenue_change
 			end
     		
-    		println(h, " : ", quantity, " at price: ", price, change_text )
+    		println(t, " : ", quantity, " at price: ", price, change_text )
     	end
     end
 
-    println("total revenue for $generator in hour $hour: $total_revenue")
+    println("total revenue for $generator in time period $time_period: $total_revenue")
 
-    if haskey(gen_data,hour-1)
-    	(quantity, price) = gen_data[hour-1]
-    	bid_price = bid_prices[hour-1]
-    	println("cost for $generator in hour $hour: $(quantity*bid_price)")
+    if haskey(gen_data,time_period-1)
+    	(quantity, price) = gen_data[time_period-1]
+    	bid_price = bid_prices[time_period-1]
+    	println("cost for $generator in time period $time_period: $(quantity*bid_price)")
     end
 
     # todo, should be a graph

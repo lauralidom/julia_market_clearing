@@ -6,7 +6,7 @@ include("../models/basic_model.jl")
 include("../models/rolling_model.jl")
 include("../models/rolling_model_with_ramp_rates.jl")
 
-include("../plots/plot_hourly_market_equilibrium.jl")
+include("../plots/plot_hourly_market_equilibrium.jl") # TODO: rename
 include("../plots/plot_market_prices_with_storage.jl")
 include("../plots/plot_state_of_charge.jl")
 include("../plots/plot_generation_stack.jl")
@@ -14,7 +14,7 @@ include("../plots/plot_generation_stack.jl")
 # rolling plots
 include("../plots/plot_price_evolution.jl")
 include("../plots/plot_generation_stack_rolling.jl")
-include("../plots/plot_dispatch_changes_for_hour.jl")
+include("../plots/plot_dispatch_changes_for_hour.jl") # TODO: rename
 include("../plots/plot_state_of_charge_rolling.jl")
 include("../plots/plot_peak_generation_and_storage_use.jl")
 include("../plots/plot_wind_forecast_stochasticity.jl")
@@ -35,7 +35,7 @@ function ClearBasic(data)
     # these display themselves, should they??
     
     for iter in m.ext[:sets][:JH]
-        PlotHourlyMarketEquilibrium.plot(m,iter)
+        PlotHourlyMarketEquilibrium.plot(m,iter) # TODO: rename
     end
     
     PlotMarketPricesWithStorage.plot(m)
@@ -45,25 +45,25 @@ end
 
 function ClearRolling(data, with_ramps)
 
-	hour_range = range(1,data[:clearForDays]*24 - data[:clearingWindow]) # go from hour 1 to the last window for which we have a full data set
-    previous_hour_data = Dict(
+	time_period_range = range(1,data[:clearForDays]*data[:timePeriodsPerDay] - data[:clearingWindow]) # go from time_period 1 to the last window for which we have a full data set
+    previous_time_period_data = Dict(
     	:SOC => data[:batteryStorage]["initialSOC"]*data[:batteryStorage]["energyCapacity"],
     	:Q_gen => Dict{String,Float64}( (g, float(gConfig["initialQuantity"])) for (g, gConfig) in data[:dispatchableGenerators])
     )
 
     resultset = ProcessData.CreateResultSet()
-    for hour in hour_range
-		m = with_ramps ? RollingModelWithRampRates.build_for_hour(data,hour,previous_hour_data) : RollingModel.build_for_hour(data,hour,previous_hour_data) 
+    for t in time_period_range
+		m = with_ramps ? RollingModelWithRampRates.build_for_time_period(data,t,previous_time_period_data) : RollingModel.build_for_time_period(data,t,previous_time_period_data) 
 	    optimize!(m)
 	    # println("Termination status: ", termination_status(m))
 	    # println("Objective value: ", objective_value(m))
 
-	    ProcessData.AddToResultSet!(resultset, m, hour)
+	    ProcessData.AddToResultSet!(resultset, m, t)
 
-	    previous_hour_data[:SOC] = HelperModelResults.SOCValues(m)[hour+data[:clearingInterval]]
-	    previous_hour_data[:SOC] = HelperModelResults.SOCValues(m)[hour+data[:clearingInterval]]
+	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
+	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
 	    
-	    println("SOC: ", previous_hour_data)
+	    # println("SOC: ", previous_time_period_data)
 
 
 
@@ -85,7 +85,7 @@ function ClearRolling(data, with_ramps)
 
 	PlotPriceEvolution.plot(priceSets)
 	PlotGenerationStackRolling.plot(resultset)
-	PlotDispatchChangesForHour.plot(resultset,"Peak",32)
+	PlotDispatchChangesForHour.plot(resultset,"Peak",32) # TODO: rename hour
 	PlotStateOfChargeRolling.plot(resultset)
 	PlotPeakGenerationAndStorageUse.plot(resultset)
 	PlotWindForecastStochasticity.plot(resultset)

@@ -8,10 +8,10 @@ include("../output_data/process_data.jl")
 
 function plot(resultset)
 
-       hours = ProcessData.Hours(resultset)
+       time_periods = ProcessData.TimePeriods(resultset)
        SOC_val = ProcessData.StorageStateOfChargeOutcomes(resultset)
 
-       p2 = Plots.plot(hours, [SOC_val[h] for h in hours], 
+       p2 = Plots.plot(time_periods, [SOC_val[t] for t in time_periods], 
               xlabel="Hour", ylabel="Energy (MWh)", 
               title="Battery State of Charge",
               label="SOC", color=:green, lw=2, fill=(0, 0.2, :green), legend=:outerbottom)
