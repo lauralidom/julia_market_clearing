@@ -5,7 +5,7 @@ nTimesteps: 96 # number of timesteps in input data
 timePeriodsPerDay: 96 # number of time periods in a day
 clearForDays: 5 # number of days to clear market for
 clearingInterval: 1 # number of time periods between market clearing/optimization rounds
-clearingWindow: 24 # number of time periods to consider in each round
+clearingWindow: 96 # number of time periods to consider in each round
 storageValue: 50 # experiment: value of stored MWh at end of window in objective function
 noiseLevel: .15 # tweak noise magnitude in variable generators
 

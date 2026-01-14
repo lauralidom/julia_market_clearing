@@ -279,7 +279,6 @@ function build_market_clearing!(m::Model, start_at_period::Int)
         # State of charge dynamics: SOC[t] = SOC[t-1] + η*Qch[t] - Qdis[t]/η
         # For first hour t=start_at_period, use initial SOC
         #  feed forward the SOC result from the previous round
-        println("constrain this storage to start at the initial SOC $SOC_init")
         @constraint(m, SOC[start_at_period] == SOC_init + η * Qch[start_at_period] - Qdis[start_at_period] / η)
         
         # interperiod constraints for hours 2+
