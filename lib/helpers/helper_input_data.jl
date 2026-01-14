@@ -15,7 +15,7 @@ function add_noise!(Q_gen_window, g, total_capacity, noise_std, first_hour, last
             decayfactor = ((h - first_hour)/(last_hour-first_hour)) # 0 for first hour, 1 for last, linear in between
         end
         # Add Gaussian noise
-        noise = randn() * noise_std * decayfactor
+        noise = randn() * noise_std * decayfactor * current_af # last factor makes this proportional
         new_af = clamp(current_af + noise, 0.0, 1.0) # constraint 0 => total_capacity
         
         Q_gen_window[(g, h)] = total_capacity * new_af

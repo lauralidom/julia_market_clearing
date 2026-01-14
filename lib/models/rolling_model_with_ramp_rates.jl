@@ -102,9 +102,7 @@ function process_time_series_data!(m::Model, data::Dict{Symbol,Any}, start_at_pe
             Pr_gen[(g,h)] = P
             Q_gen[(g,h)]  = Q * af         # available capacity = Q * profile[h]
         end
-
-        println("NOISE LEVEL HERE:::", haskey(data,:noiseLevel) && data[:noiseLevel])
-
+        
         if haskey(data,:noiseLevel) && data[:noiseLevel] > 0
             noise_std = float(data[:noiseLevel]) 
             HelperInputData.add_noise!(Q_gen, g, Q, noise_std, CH[1], CH[length(CH)])

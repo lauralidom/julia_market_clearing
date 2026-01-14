@@ -52,8 +52,7 @@ function plot(resultset)
     # Create stacked area plot
     p3 = Plots.plot(xlabel="Hour", ylabel="Power (MW)",
             title="Peak Generation and Storage Stack",
-            legend=:topright,
-            ylims=(-.5*max_y, max_y),size=(1200,1200))
+            ylims=(-.5*max_y, max_y),size=(1200,1200), legend=:outerbottom)
 
     # Stack manually using areaplot with seriestype
     for i in 1:size(stack_matrix, 1)
