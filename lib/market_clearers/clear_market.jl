@@ -18,6 +18,7 @@ include("../plots/plot_dispatch_changes_for_hour.jl") # TODO: rename
 include("../plots/plot_state_of_charge_rolling.jl")
 include("../plots/plot_peak_generation_and_storage_use.jl")
 include("../plots/plot_wind_forecast_stochasticity.jl")
+include("../plots/plot_baseline_outcomes.jl")
 
 
 include("../helpers/helper_model_results.jl")
@@ -89,6 +90,8 @@ function ClearRolling(data, with_ramps)
 	PlotStateOfChargeRolling.plot(resultset)
 	PlotPeakGenerationAndStorageUse.plot(resultset)
 	PlotWindForecastStochasticity.plot(resultset)
+
+	PlotBaselineOutcomes.plot(resultset)
 
 	#= TODO: fix these plots for the new rolling approach
 	    PlotMarketPricesWithStorage.plot(m)

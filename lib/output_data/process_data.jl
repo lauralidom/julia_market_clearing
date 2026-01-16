@@ -15,7 +15,7 @@ mutable struct ClearingData
 	TimePeriods::Vector{Int}
 	Prices::Vector{Number}
 	GenData::Dict{String, Vector{Float64}}
-	BidPrices::Dict{String, Vector{Float64}} # only gens for now
+	BidPrices::Dict{String, Vector{Float64}} # gens and demands
 	DemandData::Dict{String, Vector{Float64}}
 	StorageDischargeQuantities::Vector{Float64} # TODO: should rethink data format here for storage
 	StorageChargeQuantities::Vector{Float64}
@@ -64,6 +64,7 @@ function GetPriceSets(resultset)
 end
 
 
+# bid quantities, used for plotting noise in wind/solar inputs
 function GeneratorQuantityBidSets(resultset, generator)
 	bidsets = []
 	for result in resultset
@@ -152,6 +153,73 @@ function StorageStateOfChargeOutcomes(resultset)
 		push!(SOC_data, result.StorageStateOfCharge[1]) # only getting the SOC for this base time period - fully cleared final result
 	end
 	return SOC_data
+end
+
+mutable struct SEWOutcome
+	ConsumerSurplus::Float64
+	ProducerSurplus::Float64
+	# and I guess if we have network constraints, a congestion rent
+	# could also be nice to do this by generator type as well as in aggregate (also demands)
+	SEWOutcome() = new()
+end
+
+function SocioEconomicWelfare(resultset)
+	SEW_data = Vector{SEWOutcome}()
+
+	# for each result set
+	for result in resultset
+		println(result.BidPrices)
+		# 1. consider the final outcome for each producer in revenue for the time period - cost for the energy delivered in the time period and sum to make a producer surplus
+		
+		# for all previous rounds, how much has been procured (since the prior round), and at what cost - multiply these and add them up
+		revenue_for_period = 0.0
+		for prev_result in resultset[1:result.BaseTimePeriod] # all previous results, including the one we're inspecting for the final adjustment
+			# for each generator, get revenue
+			time_period_offset = result.BaseTimePeriod - prev_result.BaseTimePeriod + 1
+			time_period_offset > length(prev_result.Prices) && continue # there is not a clearing for this time period
+			for (g, gen_quantity) in prev_result.GenData
+				q_earlier = time_period_offset == 1 || prev_result.BaseTimePeriod == 1 || time_period_offset == length(prev_result.Prices) ? 0.0 : resultset[prev_result.BaseTimePeriod - 1].GenData[g][time_period_offset + 1] # +1 b/c in this previous clearing, this period is one further into the array
+				q_change = gen_quantity[time_period_offset] - q_earlier
+				p_at_hour = prev_result.Prices[time_period_offset]
+				additional_revenue = q_change * p_at_hour
+				if result.BaseTimePeriod == 32
+					println("$additional_revenue for period: $(result.BaseTimePeriod) for generator: $g")
+				end
+				revenue_for_period += additional_revenue
+			end
+			if result.BaseTimePeriod == 32
+				println("revenue for period $(result.BaseTimePeriod) is: $revenue_for_period")
+			end
+		end
+
+		cost_for_period = 0.0
+
+		for (g,gen_quantities) in GenData(resultset)
+			if result.BaseTimePeriod == 32
+				println("cost for gen $g in period $(result.BaseTimePeriod) is: $(gen_quantities[result.BaseTimePeriod]) times $(result.BidPrices[g][1])")
+			end
+			cost_for_gen = gen_quantities[result.BaseTimePeriod]*result.BidPrices[g][1]
+			cost_for_period += cost_for_gen
+		end
+		if result.BaseTimePeriod == 32
+			println("surplus for period $(result.BaseTimePeriod) is: $revenue_for_period - $cost_for_period = $(revenue_for_period - cost_for_period)")
+		end
+		producer_surplus = revenue_for_period - cost_for_period
+
+		# 2. consider the final outcome for each demander in bid price * quantity for the time period - payments made for the time period - NOTE: given no prediction error, this will all be cleared in the first time period considered?
+		demand_quantity_data = DemandData(resultset)
+		consumer_surplus = 0.0
+		for (d,demand_quantities) in demand_quantity_data
+			utility_gain_per_unit = result.BidPrices[d][1] - result.Prices[length(result.Prices)] # making the assumption that Qd doesn't change - this will not always be valid - need better accounting
+			surplus_utility = utility_gain_per_unit * demand_quantities[1]
+			consumer_surplus += surplus_utility
+		end
+		outcome = SEWOutcome()
+		outcome.ConsumerSurplus = consumer_surplus
+		outcome.ProducerSurplus = producer_surplus
+		push!(SEW_data, outcome) 
+	end
+	return SEW_data
 end
 
 

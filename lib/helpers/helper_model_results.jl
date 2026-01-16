@@ -19,9 +19,13 @@ end
 function BidPrices(m)
 	time_periods = TimePeriods(m)
 	IG = m.ext[:sets][:IG]
+	ID = m.ext[:sets][:ID]
     bid_prices = Dict{String, Vector{Float64}}()
     for g in IG
         bid_prices[g] = [value(m.ext[:timeseries][:Pr_gen][g,t]) for t in time_periods]
+    end
+    for d in ID
+        bid_prices[d] = [value(m.ext[:timeseries][:Pr_dem][d,t]) for t in time_periods]
     end
     return bid_prices
 end
