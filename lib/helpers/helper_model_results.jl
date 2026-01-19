@@ -76,5 +76,69 @@ function DemandData(m)
 end
 
 
+mutable struct Transaction
+	Party::String
+	Quantity::Float64
+	Price::Float64
+	TimePeriod::Int
+	ClearingTimePeriod::Int
+	Transaction() = new()
+end
+
+# compare clearing outcomes with previous clearings to generate a set of transactions
+
+# TODO: I think this will break down if we skip time periods between clearing periods
+
+function Transactions(clearingData, resultset)
+	transaction_time_period = clearingData.BaseTimePeriod
+
+	transactions = []
+	has_last_result = length(resultset) > 0 # special handling for time period 1
+	last_clearing_result = has_last_result ? resultset[length(resultset)] : nothing
+	prices = clearingData.Prices
+	# for each demand, in each time period cleared
+	for (d, dem_qs) in clearingData.DemandData
+		for (t, Qd) in enumerate(dem_qs)
+			last_clearing_q = has_last_result && length(last_clearing_result.DemandData[d]) > t ? last_clearing_result.DemandData[d][t+1] : 0.0
+			adjustment_q = Qd - last_clearing_q
+			if adjustment_q !== 0
+				transaction = Transaction()
+				transaction.Party = d
+				transaction.Quantity = adjustment_q
+				transaction.Price = prices[1]
+				transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
+				transaction.ClearingTimePeriod = clearingData.BaseTimePeriod
+				
+				push!(transactions, transaction)
+			end
+		end
+
+	end
+
+
+
+	# for each generator, in each time period cleared
+	for (g, gen_qs) in clearingData.GenData
+		for (t, Qg) in enumerate(gen_qs)
+			last_clearing_q = has_last_result && length(last_clearing_result.GenData[g]) > t ? last_clearing_result.GenData[g][t+1] : 0.0
+			adjustment_q = Qg - last_clearing_q
+			if adjustment_q !== 0
+				transaction = Transaction()
+				transaction.Party = g
+				transaction.Quantity = adjustment_q
+				transaction.Price = prices[1]
+				transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
+				transaction.ClearingTimePeriod = clearingData.BaseTimePeriod
+
+				push!(transactions, transaction)
+			end
+		end
+
+	end
+
+	return transactions
+end
+
+
 
 end;

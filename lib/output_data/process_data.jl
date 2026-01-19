@@ -20,6 +20,7 @@ mutable struct ClearingData
 	StorageDischargeQuantities::Vector{Float64} # TODO: should rethink data format here for storage
 	StorageChargeQuantities::Vector{Float64}
 	StorageStateOfCharge::Vector{Float64}
+	Transactions::Vector{HelperModelResults.Transaction}
 	ClearingData() = new()
 end
 
@@ -36,7 +37,6 @@ function AddToResultSet!(resultset, model, time_period)
 	cd = ClearingData()
 	cd.Timestamp = Dates.now()
 	cd.BaseTimePeriod = time_period
-	# todo, add some actual data
 
 	cd.TerminationStatus = termination_status(model)
 	cd.ObjectiveValue = objective_value(model)
@@ -48,6 +48,10 @@ function AddToResultSet!(resultset, model, time_period)
 	cd.StorageDischargeQuantities = HelperModelResults.StorageDischargeQuantities(model)
 	cd.StorageChargeQuantities = HelperModelResults.StorageChargeQuantities(model)
 	cd.StorageStateOfCharge = HelperModelResults.SOCValues(model)
+
+
+	cd.Transactions = HelperModelResults.Transactions(cd,resultset)
+
 	push!(resultset, cd)
 end
 
@@ -214,6 +218,65 @@ function SocioEconomicWelfare(resultset)
 			surplus_utility = utility_gain_per_unit * demand_quantities[1]
 			consumer_surplus += surplus_utility
 		end
+		outcome = SEWOutcome()
+		outcome.ConsumerSurplus = consumer_surplus
+		outcome.ProducerSurplus = producer_surplus
+		push!(SEW_data, outcome) 
+	end
+	return SEW_data
+end
+
+function SocioEconomicWelfare_T(resultset)
+	SEW_data = Vector{SEWOutcome}()
+
+	# for each result set
+	for result in resultset
+		# 1. consider the final outcome for each producer in revenue for the time period - cost for the energy delivered in the time period and sum to make a producer surplus
+		
+		# for all previous rounds, how much has been procured (since the prior round), and at what cost - multiply these and add them up
+		revenue_for_period = 0.0
+		for prev_result in resultset[1:result.BaseTimePeriod] # all previous results, including the one we're inspecting for the final adjustment
+			# for each generator, get revenue
+			
+			for t in prev_result.Transactions
+				for g in keys(prev_result.GenData)
+					revenue_for_period += (t.TimePeriod == result.BaseTimePeriod && t.Party == g ? t.Quantity * t.Price : 0.0)
+				end
+			end
+
+			if result.BaseTimePeriod == 32
+				println("revenue for period $(result.BaseTimePeriod) is: $revenue_for_period")
+			end
+		end
+
+		cost_for_period = 0.0
+
+		for (g,gen_quantities) in GenData(resultset)
+			if result.BaseTimePeriod == 32
+				println("cost for gen $g in period $(result.BaseTimePeriod) is: $(gen_quantities[result.BaseTimePeriod]) times $(result.BidPrices[g][1])")
+			end
+			cost_for_gen = gen_quantities[result.BaseTimePeriod]*result.BidPrices[g][1]
+			cost_for_period += cost_for_gen
+		end
+		if result.BaseTimePeriod == 32
+			println("surplus for period $(result.BaseTimePeriod) is: $revenue_for_period - $cost_for_period = $(revenue_for_period - cost_for_period)")
+		end
+		producer_surplus = revenue_for_period - cost_for_period
+
+		# 2. consider the final outcome for each demander in bid price * quantity for the time period - payments made for the time period - NOTE: given no prediction error, this will all be cleared in the first time period considered?
+		consumer_surplus = 0.0
+
+		for prev_result in resultset[1:result.BaseTimePeriod] # all previous results, including the one we're inspecting for the final adjustment
+			# for each generator, get revenue
+			
+			for t in prev_result.Transactions
+				for d in keys(prev_result.DemandData)
+					consumer_surplus += (t.TimePeriod == result.BaseTimePeriod && t.Party == d ? t.Quantity * t.Price : 0.0)
+				end
+			end
+
+		end
+
 		outcome = SEWOutcome()
 		outcome.ConsumerSurplus = consumer_surplus
 		outcome.ProducerSurplus = producer_surplus

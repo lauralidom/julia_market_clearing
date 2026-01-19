@@ -13,9 +13,7 @@ function plot(resultset)
 
     time_periods = ProcessData.TimePeriods(resultset)
 
-	sew = ProcessData.SocioEconomicWelfare(resultset)
-
-	println(sew)
+	sew = ProcessData.SocioEconomicWelfare_T(resultset)
 	
     # Define consistent colors
     colors = [:steelblue, :lightgreen]
