@@ -39,6 +39,15 @@ function plot(resultset, generator, time_period)
     	println("cost for $generator in time period $time_period: $(quantity*bid_price)")
     end
 
+    transactions = ProcessData.Transactions(resultset)
+
+    for transaction in transactions
+    	if transaction.Party == generator && transaction.TimePeriod == time_period
+    		println("Transaction for time period $(transaction.TimePeriod): $(transaction.Party) Q: $(transaction.Quantity) P: $(transaction.Price) CTP: $(transaction.ClearingTimePeriod)")
+    	end
+    end
+
+
     # todo, should be a graph
 end
 

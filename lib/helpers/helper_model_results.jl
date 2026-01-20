@@ -82,6 +82,7 @@ mutable struct Transaction
 	Price::Float64
 	TimePeriod::Int
 	ClearingTimePeriod::Int
+	IsDemand::Bool
 	Transaction() = new()
 end
 
@@ -99,16 +100,17 @@ function Transactions(clearingData, resultset)
 	# for each demand, in each time period cleared
 	for (d, dem_qs) in clearingData.DemandData
 		for (t, Qd) in enumerate(dem_qs)
-			last_clearing_q = has_last_result && length(last_clearing_result.DemandData[d]) > t ? last_clearing_result.DemandData[d][t+1] : 0.0
+			last_clearing_q = has_last_result && length(last_clearing_result.DemandData[d]) > t ? last_clearing_result.DemandData[d][t + 1] : 0.0
 			adjustment_q = Qd - last_clearing_q
-			if adjustment_q !== 0
+			if adjustment_q != 0.0
 				transaction = Transaction()
 				transaction.Party = d
 				transaction.Quantity = adjustment_q
 				transaction.Price = prices[1]
 				transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
 				transaction.ClearingTimePeriod = clearingData.BaseTimePeriod
-				
+				transaction.IsDemand = true
+
 				push!(transactions, transaction)
 			end
 		end
@@ -120,15 +122,17 @@ function Transactions(clearingData, resultset)
 	# for each generator, in each time period cleared
 	for (g, gen_qs) in clearingData.GenData
 		for (t, Qg) in enumerate(gen_qs)
-			last_clearing_q = has_last_result && length(last_clearing_result.GenData[g]) > t ? last_clearing_result.GenData[g][t+1] : 0.0
+			last_clearing_q = has_last_result && length(last_clearing_result.GenData[g]) > t ? last_clearing_result.GenData[g][t + 1] : 0.0
 			adjustment_q = Qg - last_clearing_q
-			if adjustment_q !== 0
+
+			if adjustment_q != 0.0
 				transaction = Transaction()
 				transaction.Party = g
 				transaction.Quantity = adjustment_q
 				transaction.Price = prices[1]
 				transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
 				transaction.ClearingTimePeriod = clearingData.BaseTimePeriod
+				transaction.IsDemand = false
 
 				push!(transactions, transaction)
 			end

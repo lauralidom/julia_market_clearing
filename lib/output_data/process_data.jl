@@ -88,6 +88,16 @@ function TimePeriods(resultset)
 	return time_periods
 end
 
+
+function DispatchedTimePeriods(resultset)
+	time_periods = TimePeriods(resultset)
+	final_dispatch = resultset[length(resultset)].TimePeriods
+	
+	append!(time_periods, final_dispatch[2:length(final_dispatch)])
+
+	return time_periods
+end
+
 function GenData(resultset)
 	gen_data = Dict{String, Vector{Float64}}()
 	for key in keys(resultset[1].GenData)
@@ -283,6 +293,16 @@ function SocioEconomicWelfare_T(resultset)
 		push!(SEW_data, outcome) 
 	end
 	return SEW_data
+end
+
+# TODO: work out appending here
+
+function Transactions(resultset)
+	all_transactions = []
+	for result in resultset
+		append!(all_transactions, result.Transactions)
+	end
+	return all_transactions
 end
 
 
