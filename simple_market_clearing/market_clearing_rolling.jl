@@ -5,6 +5,7 @@ using JuMP
 using HiGHS
 using Plots
 using Statistics
+using Distributions
 
 include("src/model_setup.jl")
 include("src/market_model.jl")
@@ -24,6 +25,7 @@ sim_days = Int(rh_params["simulation_days"])
 look_ahead = Int(rh_params["look_ahead_window"])
 reclear_freq = Int(rh_params["reclear_frequency"])
 forecast_noise = float(rh_params["forecast_noise_std"])
+
 
 # Add 1 hour for prep hour (hour 0)
 total_hours = sim_days * 24 + 1
@@ -288,7 +290,4 @@ savefig(p, "rolling_horizon_results.png")
 println("Plot saved to: rolling_horizon_results.png")
 display(p)
 println()
-
-# Export analysis to Excel
-export_clearing_analysis_to_excel(all_results, clearing_count, IG, "clearing_analysis.xlsx")
 end  

@@ -161,15 +161,18 @@ function get_window_timeseries(Pr_gen_full, Q_gen_full, Pr_dem_full, Q_dem_full,
 end
 
 # 4: Add wind forecast noise to simulate uncertainty
-# normally distributed with standard deviation from input_data.yaml
-# NOTE: No noise applied to hour 1 (locked hour) to maintain feasibility
-function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, noise_std::Float64, 
+# Uses t-distribution (df=5) with square root decay for realistic forecast errors
+# Hour 1: no noise (forecast = realized wind)
+# Hour 24: maximum noise (std_dev = max_std)
+# Noise decreases with concave curve (sqrt) as we get closer to real-time
+function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, max_noise_std::Float64, 
                                    IG::Vector, window_length::Int)
-    if noise_std == 0.0
+    if max_noise_std == 0.0
         return  # no noise
     end
     
     var_gen = cfg["variableGenerators"]
+    t_dist = TDist(5)  # t-distribution with 5 degrees of freedom (fat tails)
     
     for (gname, gdata_any) in var_gen
         g = String(gname)
@@ -177,16 +180,21 @@ function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, noise_std::Floa
             Q = float(gdata_any["capacity"])
             
             for h in 1:window_length
-                # Skip hour 1 (locked hour) - no noise to maintain feasibility
+                # Hour 1: no noise (forecast equals realized wind)
                 if h == 1
                     continue
                 end
                 
+                # Calculate time-dependent std dev using square root decay
+                # Hour 2 → small noise, Hour 24 → max noise
+                time_factor = sqrt((h - 1) / (window_length - 1))
+                std_dev = max_noise_std * time_factor
+                
                 # Current forecast (availability factor)
                 current_af = Q_gen_window[(g, h)] / Q
                 
-                # Add Gaussian noise
-                noise = randn() * noise_std
+                # Add t-distributed noise (fatter tails than Gaussian)
+                noise = rand(t_dist) * std_dev
                 new_af = clamp(current_af + noise, 0.0, 1.0)
                 
                 Q_gen_window[(g, h)] = Q * new_af

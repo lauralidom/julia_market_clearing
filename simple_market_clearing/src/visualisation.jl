@@ -106,12 +106,8 @@ function plot_rolling_horizon_results(all_results::Dict)
     # Create a mapping of clearing_count to clearing_times
     # clearing_times is stored sequentially for each optimal clearing
     clearing_to_hour = Dict{Int, Int}()
-    time_idx = 1
-    for c_num in 1:length(all_results[:clearing_times]) + length(all_results[:infeasible_clearings])
-        if !(c_num in all_results[:infeasible_clearings])
-            clearing_to_hour[c_num] = all_results[:clearing_times][time_idx]
-            time_idx += 1
-        end
+    for (c_num, clearing_time) in enumerate(all_results[:clearing_times])
+        clearing_to_hour[c_num] = clearing_time
     end
     
     # Plot each feasible clearing's wind forecast
@@ -199,103 +195,4 @@ function show_clearing_analysis(all_results::Dict, total_clearings::Int, IG::Vec
     end
     
     println("="^80)
-end
-
-function export_clearing_analysis_to_excel(all_results::Dict, total_clearings::Int, IG::Vector, filename::String="clearing_analysis.xlsx")
-    if total_clearings < 1
-        println("No clearings to export.")
-        return
-    end
-    
-    # Select clearings to display: first, middle, last
-    selected_clearings = Int[]
-    push!(selected_clearings, 1)  # First clearing
-    if total_clearings > 2
-        push!(selected_clearings, div(total_clearings, 2))  # Middle clearing
-    end
-    push!(selected_clearings, total_clearings)  # Last clearing
-    
-    # Create workbook
-    XLSX.openxlsx(filename, mode="w") do xf
-        
-        # Summary sheet
-        sheet_summary = xf[1]
-        XLSX.rename!(sheet_summary, "Summary")
-        sheet_summary["A1"] = "Clearing Analysis Summary"
-        sheet_summary["A2"] = "Total Clearings"
-        sheet_summary["B2"] = total_clearings
-        sheet_summary["A3"] = "Infeasible Clearings"
-        sheet_summary["B3"] = length(all_results[:infeasible_clearings])
-        if !isempty(all_results[:infeasible_clearings])
-            sheet_summary["C3"] = join(all_results[:infeasible_clearings], ", ")
-        end
-        
-        sheet_summary["A5"] = "Generator List"
-        for (idx, g) in enumerate(IG)
-            sheet_summary["A$(5 + idx)"] = String(g)
-        end
-        
-        # Create sheets for each selected clearing
-        for (sheet_idx, clearing_idx) in enumerate(selected_clearings)
-            if !haskey(all_results[:clearing_details], clearing_idx)
-                continue
-            end
-            
-            details = all_results[:clearing_details][clearing_idx]
-            current_hour = details[:current_hour]
-            Q_prev = details[:Q_prev]
-            q_val = details[:q]
-            g_planned = details[:g_planned]
-            prices = details[:prices]
-            
-            # Create new sheet
-            if sheet_idx == 1
-                sheet = xf[1]
-                XLSX.rename!(sheet, "Clearing_$clearing_idx")
-            else
-                sheet = XLSX.addsheet!(xf, "Clearing_$clearing_idx")
-            end
-            
-            # Header
-            sheet["A1"] = "Clearing #$clearing_idx (Global Hour: $current_hour)"
-            
-            # Column headers
-            sheet["A3"] = "Hour"
-            sheet["B3"] = "Generator"
-            sheet["C3"] = "q_prev (MW)"
-            sheet["D3"] = "λ (€/MWh)"
-            sheet["E3"] = "q (MW)"
-            sheet["F3"] = "g_plan (MW)"
-            sheet["G3"] = "Δ (%)"
-            
-            # Data rows
-            row = 4
-            for h in 1:min(24, length(prices))
-                for g in IG
-                    q_prev_val = Q_prev[(String(g), h)]
-                    q_adj = q_val[g, h]
-                    g_plan = g_planned[g, h]
-                    price = prices[h]
-                    
-                    δ_pct = if q_prev_val > 0.001
-                        (q_adj / q_prev_val) * 100
-                    else
-                        0.0
-                    end
-                    
-                    sheet["A$row"] = h
-                    sheet["B$row"] = String(g)
-                    sheet["C$row"] = round(q_prev_val; digits=2)
-                    sheet["D$row"] = round(price; digits=2)
-                    sheet["E$row"] = round(q_adj; digits=2)
-                    sheet["F$row"] = round(g_plan; digits=2)
-                    sheet["G$row"] = round(δ_pct; digits=1)
-                    
-                    row += 1
-                end
-            end
-        end
-    end
-    
-    println("✓ Analysis exported to: $filename")
 end
