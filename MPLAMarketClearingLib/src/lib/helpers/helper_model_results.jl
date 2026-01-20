@@ -75,6 +75,8 @@ function DemandData(m)
     return dem_data
 end
 
+@enum PartyTypeEnum PARTY_DEMAND PARTY_GENERATOR PARTY_STORAGE
+
 
 mutable struct Transaction
 	Party::String
@@ -82,8 +84,19 @@ mutable struct Transaction
 	Price::Float64
 	TimePeriod::Int
 	ClearingTimePeriod::Int
-	IsDemand::Bool
+	PartyType::PartyTypeEnum
 	Transaction() = new()
+end
+
+function MakeTransaction(party, quantity, price, time_period, clearing_time_period, party_type) 
+	t = Transaction()
+	t.Party = party
+	t.Quantity = quantity
+	t.Price = price
+	t.TimePeriod = time_period
+	t.ClearingTimePeriod = clearing_time_period
+	t.PartyType = party_type
+	return t
 end
 
 # compare clearing outcomes with previous clearings to generate a set of transactions
@@ -106,10 +119,10 @@ function Transactions(clearingData, resultset)
 				transaction = Transaction()
 				transaction.Party = d
 				transaction.Quantity = adjustment_q
-				transaction.Price = prices[1]
+				transaction.Price = prices[t]
 				transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
 				transaction.ClearingTimePeriod = clearingData.BaseTimePeriod
-				transaction.IsDemand = true
+				transaction.PartyType = PARTY_DEMAND
 
 				push!(transactions, transaction)
 			end
@@ -129,10 +142,10 @@ function Transactions(clearingData, resultset)
 				transaction = Transaction()
 				transaction.Party = g
 				transaction.Quantity = adjustment_q
-				transaction.Price = prices[1]
+				transaction.Price = prices[t]
 				transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
 				transaction.ClearingTimePeriod = clearingData.BaseTimePeriod
-				transaction.IsDemand = false
+				transaction.PartyType = PARTY_GENERATOR
 
 				push!(transactions, transaction)
 			end

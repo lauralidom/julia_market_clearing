@@ -4,7 +4,7 @@
 using JuMP
 using YAML
 
-include("../../lib/helpers/helper_input_data.jl")
+include("../../MPLAMarketClearingLib/src/lib/helpers/helper_input_data.jl")
 
 # 0: Load Input Data from YAML
 function load_input_data(path::String)

@@ -5,6 +5,7 @@ using JuMP
 using Statistics
 
 include("../output_data/process_data.jl")
+include("../helpers/helper_model_results.jl")
 
 function plot(resultset, clearing_time_period)
 
@@ -34,7 +35,7 @@ function plot(resultset, clearing_time_period)
     		stack_matrix[2, transaction.TimePeriod] += -.5*abs(transaction.Quantity) # quantity dispatched in this clearing period for each period considered, half of abs so they don't cancel each other out, subtracted so that it is shown as a portion of the total dispatched generation
     	end
 		# this is all generation transactions that have happened for this period 
-    	if !transaction.IsDemand
+    	if transaction.PartyType != HelperModelResults.PARTY_DEMAND
     		stack_matrix[1, transaction.TimePeriod] += transaction.Quantity # quantity dispached in other clearing periods - half of absolute value so they don't cancel each other out
 		end
         

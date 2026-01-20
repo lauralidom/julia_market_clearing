@@ -1,0 +1,201 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"lines_en",
+				"lines_ending_at_node_i"
+			],
+			[
+				"de",
+				"demand_bids"
+			],
+			[
+				"lin",
+				"lines_ending_at_node"
+			]
+		]
+	},
+	"buffers":
+	[
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"console":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code/MPLAMarketClearingLib",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code/MPLAMarketClearingLib/src",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code/simple_market_clearing",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code/simple_market_clearing/src"
+	],
+	"file_history":
+	[
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code/simple_market_clearing/market_clearing_rolling.jl",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/Code/simple_market_clearing/src/model_setup.jl",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Documents/julia/DTU_coursework/exercise_1.jl",
+		"/C/Users/Atkin005/test.jl",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Fumagalli, E.M. (Elena)'s files - MODES/2025_11_25_Preparation_second_consortium_event/Results/Consolidated Notes from 25 November MODES Meeting at KGG",
+		"/C/Users/Atkin005/generator_test.yaml",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Fumagalli, E.M. (Elena)'s files - MODES/2025_11_25_Preparation_second_consortium_event/Consolidated Notes from 25 November MODES Meeting at KGG",
+		"/C/Users/Atkin005/OneDrive - Universiteit Utrecht/Fumagalli, E.M. (Elena)'s files - MODES/2025_11_25_Preparation_second_consortium_event/25Nov_PartnerFeedbackSummary",
+		"/C/Users/Atkin005/Downloads/978-3-030-37818-9.epub"
+	],
+	"find":
+	{
+		"height": 38.0
+	},
+	"find_in_files":
+	{
+		"height": 0.0,
+		"where_history":
+		[
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"add_wind_forecast_noise",
+			"nodal_balance",
+			"[]\n"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+		],
+		"reverse": false,
+		"scrollbar_highlights": true,
+		"show_context": true,
+		"use_buffer2": true,
+		"use_gitignore": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"sheets":
+			[
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 23.3333333333
+	},
+	"input":
+	{
+		"height": 0.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": true,
+	"output.find_results":
+	{
+		"height": 0.0,
+		"history":
+		[
+		]
+	},
+	"pinned_build_system": "",
+	"project": "MPLAMarketClearing.sublime-project",
+	"replace":
+	{
+		"height": 42.6666666667
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 378.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}

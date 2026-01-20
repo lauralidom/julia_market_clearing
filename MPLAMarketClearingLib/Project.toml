@@ -1,0 +1,12 @@
+name = "MPLAMarketClearingLib"
+uuid = "98170954-d10d-40f6-a721-b2332923ec56"
+version = "0.1.0"
+authors = ["Atkin005 "]
+
+[deps]
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[compat]
+JuMP = "1.29.4"
+Test = "1.11.0"
