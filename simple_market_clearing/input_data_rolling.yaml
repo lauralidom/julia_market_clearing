@@ -3,6 +3,7 @@ rolling_horizon:
   simulation_days: 2             # total days to simulate 
   look_ahead_window: 24           # hours to optimise ahead
   reclear_frequency: 1            # reclear every N hours
+  gate_closure: 1                 # hours locked from gate closure (no adjustment allowed)
   forecast_noise_std: 0.10        # standard deviation of wind forecast noise (0 = no noise)
 
 

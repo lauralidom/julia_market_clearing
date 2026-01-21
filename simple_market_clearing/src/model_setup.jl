@@ -179,18 +179,18 @@ function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, max_noise_std::
         if g in IG
             Q = float(gdata_any["capacity"])
             
+            # Apply noise to all hours with time-dependent decay
             for h in 1:window_length
-                # Hour 1: no noise (forecast equals realized wind)
+                # Calculate time-dependent std dev using square root decay
+                # h=1 → zero noise (real wind), h=window_length → max noise
                 if h == 1
-                    continue
+                    continue  # No noise at h=1, forecast = reality
                 end
                 
-                # Calculate time-dependent std dev using square root decay
-                # Hour 2 → small noise, Hour 24 → max noise
                 time_factor = sqrt((h - 1) / (window_length - 1))
                 std_dev = max_noise_std * time_factor
                 
-                # Current forecast (availability factor)
+                # Current forecast (availability factor)      
                 current_af = Q_gen_window[(g, h)] / Q
                 
                 # Add t-distributed noise (fatter tails than Gaussian)

@@ -24,6 +24,7 @@ rh_params = cfg["rolling_horizon"]
 sim_days = Int(rh_params["simulation_days"])
 look_ahead = Int(rh_params["look_ahead_window"])
 reclear_freq = Int(rh_params["reclear_frequency"])
+gate_closure = Int(rh_params["gate_closure"])
 forecast_noise = float(rh_params["forecast_noise_std"])
 
 
@@ -32,7 +33,8 @@ total_hours = sim_days * 24 + 1
 
 println("Rolling Horizon Market Clearing Simulation")
 println("Simulation: $sim_days days + 1 prep hour | Look-ahead: $look_ahead hours | Reclear frequency: every $reclear_freq hour(s)")
-println() #this adds an enter line
+println("Gate closure: $gate_closure hour(s) | Peak+Wind flexible, Base locked during gate closure")
+println()
 
 # Load the base data structure
 data = load_input_data("input_data_rolling.yaml")
@@ -68,16 +70,6 @@ end
 storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["batteryStorage"]["energyCapacity"])
 
 
-#Initialise dictionary to hold locked hour wind availability
-var_gen = cfg["variableGenerators"]
-prev_Q_gen_locked = Dict{String,Float64}()
-for (gname, _) in var_gen
-    g = String(gname)
-    if g in IG
-        prev_Q_gen_locked[g] = NaN
-    end
-end
-
 # MAIN ROLLING HORIZON LOOP
 
 clearing_count = 0
@@ -95,28 +87,9 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
         current_hour, look_ahead, IG, ID
     )
     
-    # Inject previous clearing’s next-hour wind availability into current locked hour
-    if clearing_count > 1
-        for (gname, _) in var_gen
-            g = String(gname)
-            if g in IG
-                Q_gen_window[(g, 1)] = prev_Q_gen_locked[g]
-            end
-        end
-    end
-
-    # Add forecast noise
+    # Add forecast noise to wind (applies to all hours, with decay making h=1 converge to real wind)
     if forecast_noise > 0.0
         add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, look_ahead)
-    end
-
-    # Save availability for the hour that will become locked next clearing
-    h_lock_next = 1 + reclear_freq
-    for (gname, _) in var_gen
-        g = String(gname)
-        if g in IG
-            prev_Q_gen_locked[g] = Q_gen_window[(g, h_lock_next)]
-        end
     end
     
     # Create new model for this window
@@ -146,6 +119,9 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     
     # Pass storage SOC carryover
     m.ext[:parameters][:storage_initial_soc] = storage_soc_carryover
+    
+    # Pass gate closure parameter
+    m.ext[:parameters][:gate_closure] = gate_closure
     
     # Build and solve
     build_market_clearing!(m)
@@ -191,12 +167,13 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     # g_planned[g,h] from this clearing becomes q_prev[g,h] in next clearing
     prev_q_financial = extract_window_commitments(g_planned_val, IG, look_ahead)
     
-    # Storage state continuity: pass executed hour SOC to next clearing
+    # Storage state continuity: pass executed hours SOC to next clearing
+    # After reclear_freq hours, we need SOC at the end of those executed hours
     SOC_val = value.(m.ext[:variables][:SOC])
-    storage_soc_carryover = SOC_val[1]  # SOC after executing hour 1 (the only realised hour)
+    storage_soc_carryover = SOC_val[reclear_freq]  # SOC after executing reclear_freq hours
     
     # KIND OF COMPLICATED LOGIC FOR PRINTING THE PRICE SETTER
-    # Executed-hour (h=1) summary
+    # Print diagnostics for hour 1 and final executed hour (h=reclear_freq)
     h = 1
     λ_h1 = round(prices_window[h]; digits=2)
     if λ_h1 == -0.0
@@ -290,4 +267,5 @@ savefig(p, "rolling_horizon_results.png")
 println("Plot saved to: rolling_horizon_results.png")
 display(p)
 println()
+
 end  

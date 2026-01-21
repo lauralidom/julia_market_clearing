@@ -72,7 +72,8 @@ function plot_rolling_horizon_results(all_results::Dict)
             # Create stacked area plot
             p_sub = plot(title="Clearing $clearing_num (Global Hours $(start_global_hour)-$(start_global_hour+23))",
                         xlabel="Local Hour", ylabel="MW",
-                        legend=:topright, size=(480, 350))
+                        legend=:bottomright, size=(480, 350),
+                        legendfontsize=6, tickfontsize=7, guidefontsize=8, titlefontsize=11)
             
             # Plot stacked areas (bottom to top: Base, Wind, Peak, Discharge)
             plot!(p_sub, local_hours, base_cum, fill=(0, 0.6, :blue), label="Base", linewidth=0)
@@ -82,7 +83,7 @@ function plot_rolling_horizon_results(all_results::Dict)
             
             # Add demand line on top
             plot!(p_sub, local_hours, total_demand,
-                  label="Demand+Charging", linewidth=2.5, linestyle=:dash, color=:black)
+                  label="Demand+\nCharging", linewidth=2.5, linestyle=:dash, color=:black)
             
             push!(subplots, p_sub)
         end
@@ -96,7 +97,8 @@ function plot_rolling_horizon_results(all_results::Dict)
     # Each clearing line shows its 24-hour wind forecast from its perspective
     p3 = plot(xlabel="Global Hour (Simulation)", ylabel="Wind Generation (MW)",
               title="Wind Generation Forecasts - Rolling Horizon Evolution",
-              legend=:topright, linewidth=2)
+              legend=:topright, linewidth=2,
+              legendfontsize=7, tickfontsize=8, guidefontsize=9, titlefontsize=11)
     
     # Get feasible clearing numbers in order
     feasible_clearings = sort(collect(keys(dispatch_dict)))
@@ -122,9 +124,18 @@ function plot_rolling_horizon_results(all_results::Dict)
             # X-axis: global hours from clearing_hour to clearing_hour + look_ahead - 1
             global_hours = clearing_hour:(clearing_hour + length(wind_gen) - 1)
             
+            # Create label: only show up to clearing 5, then "..."
+            if clearing_num <= 5
+                label_text = "Clearing $clearing_num"
+            elseif clearing_num == 6
+                label_text = "..."
+            else
+                label_text = nothing  # Don't show in legend
+            end
+            
             # Plot this clearing's wind forecast
             plot!(p3, global_hours, wind_gen,
-                  label="Clearing $clearing_num", color=colors[color_idx], alpha=0.8)
+                  label=label_text, color=colors[color_idx], alpha=0.8)
         end
     end
     

@@ -1,9 +1,14 @@
 # MARKET CLEARING MODEL BUILDER
+# 
+# Rolling horizon intraday market with gate closure and flexibility provisions:
+# - q_prev: financial position from previous clearing
+# - q: adjustment in current clearing (can be negative to buy back)
+# - g_planned: updated physical position = q_prev + q
+# - Gate closure locks Base generators to q_prev
+# - Peak generator remains flexible to balance wind forecast updates
+# - Wind gets fresh forecasts every clearing (converging to reality at h=1)
 
 using JuMP
-
-# q_prev is financial position, q is adjustment in current timestep, g_planned is updated position
-# Storage (Qch/Qdis/SOC) participates as a market participant with financial q_prev like generators
 
 function build_market_clearing!(m::Model)
 
@@ -90,11 +95,14 @@ function build_market_clearing!(m::Model)
         SOC[h] == SOC[h-1] + η * Qch[h] - Qdis[h] / η
     )
 
-    # Step 10: Rolling horizon fixing h=1
-    # This means: q[g,1]= 0, so g_planned[g,1]= q_prev[g,1]
-    m.ext[:constraints][:no_trade_hour1] = @constraint(
-        m, [g in IG],
-        q[g,1] == 0
+    # Step 10: Rolling horizon gate closure constraints
+    # Gate closure locks dispatchable generators except Peak
+    # Peak remains flexible to balance last-minute wind forecast updates
+    # q[g,h] = 0 means g_planned[g,h] = q_prev[g,h] (locked to previous commitment)
+    gate_closure = m.ext[:parameters][:gate_closure]
+    m.ext[:constraints][:no_trade_locked_hours] = @constraint(
+        m, [g in IG, h in JH; h <= gate_closure && String(g) != "Peak" && String(g) != "Wind"],
+        q[g,h] == 0
     )
 
     # Step 11: Welfare objective (physical costs and demand value only)
