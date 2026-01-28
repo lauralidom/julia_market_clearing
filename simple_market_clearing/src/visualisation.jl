@@ -3,207 +3,127 @@
 using Plots, Statistics, Printf, XLSX
 
 function plot_rolling_horizon_results(all_results::Dict)
-    # Plot 1: Price forecasts from clearings 1-4
+    # Global parameters for all visualizations
+    start_clearing = 3  # Can be changed from 1 to 160
+    num_clearings_to_show = 5
+    
     clearing_details = all_results[:clearing_details]
+    dispatch_dict = all_results[:dispatch]
     
+    # Calculate global hour range for consistent x-axis across all plots
+    clearing_indices = start_clearing:(start_clearing + num_clearings_to_show - 1)
+    start_global_hour = clearing_details[start_clearing][:current_hour]
+    last_clearing_start = clearing_details[clearing_indices[end]][:current_hour]
+    end_global_hour = last_clearing_start + 23
+    
+    # Plot 1: Price forecasts for the selected clearings
     p1 = plot(xlabel="Global Hour", ylabel="Price (EUR/MWh)",
-              title="Price Forecasts - Clearings 1-4",
-              legend=:topright, linewidth=2.5, size=(800, 400))
+              title="Price Forecasts - Clearings $start_clearing-$(start_clearing+num_clearings_to_show-1)",
+              legend=:topright, linewidth=2.5, size=(1000, 400))
     
-    for clearing_num in 1:4
+    # Define line styles and markers to distinguish overlapping lines
+    line_styles = [:solid, :dash, :dot, :dashdot, :dashdotdot]
+    markers = [:circle, :square, :diamond, :utriangle, :dtriangle]
+    
+    for (idx, clearing_num) in enumerate(clearing_indices)
         if haskey(clearing_details, clearing_num)
             details = clearing_details[clearing_num]
-            start_global_hour = details[:current_hour]
+            clearing_start_hour = details[:current_hour]
             prices = details[:prices]
             
             # Global hours for this clearing
             local_hours = 1:length(prices)
-            global_hours = start_global_hour .+ (local_hours .- 1)
+            global_hours = clearing_start_hour .+ (local_hours .- 1)
             
-            # Plot this clearing's price forecast
-            plot!(p1, global_hours, prices, label="Clearing $clearing_num", linewidth=2.5)
+            # Plot this clearing's price forecast with unique style
+            plot!(p1, global_hours, prices, 
+                  label="Clearing $clearing_num", 
+                  linewidth=2.5,
+                  linestyle=line_styles[idx],
+                  marker=markers[idx],
+                  markersize=4,
+                  markerstrokewidth=0,
+                  alpha=0.85)
         end
     end
     
-    # Plot dispatch and demand from clearings 2, 3, 4 (3 stacked area subplots)
-    dispatch_dict = all_results[:dispatch]
-    clearing_details = all_results[:clearing_details]
-    p2 = nothing
+    # Set consistent x-axis limits for price plot
+    xlims!(p1, start_global_hour - 0.5, end_global_hour + 0.5)
     
-    if haskey(dispatch_dict, 2) && haskey(dispatch_dict, 3) && haskey(dispatch_dict, 4)
-        # Create 3 subplots for clearings 2, 3, 4
-        subplots = []
-        clearing_nums = [2, 3, 4]
+    # Plot generator position evolution across consecutive clearings
+    # Shows how g_planned and q change for each generator
+    generators = ["Peak", "Wind"]
+    
+    # Create subplots - one for each generator
+    subplots = []
+    
+    for gen_name in generators
+        # Create subplot for this generator
+        p_gen = plot(title="$gen_name", xlabel="Global Hour", ylabel="Clearing",
+                    legend=false, size=(1000, 400),
+                    yticks=(0:num_clearings_to_show, ["q_prev", "C$start_clearing", "C$(start_clearing+1)", 
+                                                       "C$(start_clearing+2)", "C$(start_clearing+3)", "C$(start_clearing+4)"]),
+                    yflip=true, tickfontsize=7, guidefontsize=9, titlefontsize=11)
         
-        for (idx, clearing_num) in enumerate(clearing_nums)
-            if !haskey(dispatch_dict, clearing_num) || !haskey(clearing_details, clearing_num)
-                continue
-            end
+        # First row: q_prev (previous position before the starting clearing)
+        if haskey(clearing_details, start_clearing)
+            Q_prev_dict = clearing_details[start_clearing][:Q_prev]
+            clearing_start_hour = clearing_details[start_clearing][:current_hour]
             
-            clearing_data = dispatch_dict[clearing_num]
-            details = clearing_details[clearing_num]
-            start_global_hour = details[:current_hour]
-            
-            # Get all 24 hours of local indices
-            local_hours = 1:24
-            
-            # Extract dispatch for Base, Wind, Peak (in that order for stacking)
-            base_gen = get(clearing_data, "Base", zeros(24))[local_hours]
-            wind_gen = get(clearing_data, "Wind", zeros(24))[local_hours]
-            peak_gen = get(clearing_data, "Peak", zeros(24))[local_hours]
-            
-            # Extract battery discharge
-            discharging = details[:discharging][local_hours]
-            
-            # Extract demand components
-            demand_base = details[:demand_base][local_hours]
-            demand_flex = details[:demand_flex][local_hours]
-            charging = details[:charging][local_hours]
-            
-            # Total demand line = base + flex + charging
-            total_demand = demand_base .+ demand_flex .+ charging
-            
-            # Compute cumulative sums for stacking (supply side: Base, Wind, Peak, Discharge)
-            base_cum = base_gen
-            wind_cum = base_cum .+ wind_gen
-            peak_cum = wind_cum .+ peak_gen
-            discharge_cum = peak_cum .+ discharging
-            
-            # Create stacked area plot
-            p_sub = plot(title="Clearing $clearing_num (Global Hours $(start_global_hour)-$(start_global_hour+23))",
-                        xlabel="Local Hour", ylabel="MW",
-                        legend=:bottomright, size=(480, 350),
-                        legendfontsize=6, tickfontsize=7, guidefontsize=8, titlefontsize=11)
-            
-            # Plot stacked areas (bottom to top: Base, Wind, Peak, Discharge)
-            plot!(p_sub, local_hours, base_cum, fill=(0, 0.6, :blue), label="Base", linewidth=0)
-            plot!(p_sub, local_hours, wind_cum, fill=(base_cum, 0.6, :green), label="Wind", linewidth=0)
-            plot!(p_sub, local_hours, peak_cum, fill=(wind_cum, 0.6, :orange), label="Peak", linewidth=0)
-            plot!(p_sub, local_hours, discharge_cum, fill=(peak_cum, 0.6, :yellow), label="Discharge", linewidth=0)
-            
-            # Add demand line on top
-            plot!(p_sub, local_hours, total_demand,
-                  label="Demand+\nCharging", linewidth=2.5, linestyle=:dash, color=:black)
-            
-            push!(subplots, p_sub)
-        end
-        
-        if length(subplots) == 3
-            p2 = plot(subplots[1], subplots[2], subplots[3], layout=(1,3), size=(1400, 400))
-        end
-    end
-    
-    # Create new p3: Wind generation evolution across feasible clearings
-    # Each clearing line shows its 24-hour wind forecast from its perspective
-    p3 = plot(xlabel="Global Hour (Simulation)", ylabel="Wind Generation (MW)",
-              title="Wind Generation Forecasts - Rolling Horizon Evolution",
-              legend=:topright, linewidth=2,
-              legendfontsize=7, tickfontsize=8, guidefontsize=9, titlefontsize=11)
-    
-    # Get feasible clearing numbers in order
-    feasible_clearings = sort(collect(keys(dispatch_dict)))
-    num_feasible = length(feasible_clearings)
-    colors = palette(:tab20, num_feasible)
-    
-    # Create a mapping of clearing_count to clearing_times
-    # clearing_times is stored sequentially for each optimal clearing
-    clearing_to_hour = Dict{Int, Int}()
-    for (c_num, clearing_time) in enumerate(all_results[:clearing_times])
-        clearing_to_hour[c_num] = clearing_time
-    end
-    
-    # Plot each feasible clearing's wind forecast
-    for (color_idx, clearing_num) in enumerate(feasible_clearings)
-        clearing_data = dispatch_dict[clearing_num]
-        if haskey(clearing_data, "Wind")
-            wind_gen = clearing_data["Wind"]
-            
-            # Get the starting hour for this clearing
-            clearing_hour = clearing_to_hour[clearing_num]
-            
-            # X-axis: global hours from clearing_hour to clearing_hour + look_ahead - 1
-            global_hours = clearing_hour:(clearing_hour + length(wind_gen) - 1)
-            
-            # Create label: only show up to clearing 5, then "..."
-            if clearing_num <= 5
-                label_text = "Clearing $clearing_num"
-            elseif clearing_num == 6
-                label_text = "..."
-            else
-                label_text = nothing  # Don't show in legend
-            end
-            
-            # Plot this clearing's wind forecast
-            plot!(p3, global_hours, wind_gen,
-                  label=label_text, color=colors[color_idx], alpha=0.8)
-        end
-    end
-    
-    # Combine plots
-    if !isnothing(p2)
-        plot(p1, p2, p3, layout=(3,1), size=(1000, 900))
-    else
-        plot(p1, p3, layout=(2,1), size=(1000, 600))
-    end
-end
-
-function show_clearing_analysis(all_results::Dict, total_clearings::Int, IG::Vector)
-    if total_clearings < 2
-        println("Not enough clearings to analyze.")
-        return
-    end
-    
-    # Select clearings to display: first, middle, last
-    selected_clearings = Int[]
-    push!(selected_clearings, 1)  # First clearing
-    if total_clearings > 2
-        push!(selected_clearings, div(total_clearings, 2))  # Middle clearing
-    end
-    push!(selected_clearings, total_clearings)  # Last clearing
-    
-    println()
-    println("="^80)
-    println("DETAILED CLEARING ANALYSIS - Adjustment Market Behavior")
-    println("="^80)
-    
-    for clearing_idx in selected_clearings
-        details = all_results[:clearing_details][clearing_idx]
-        current_hour = details[:current_hour]
-        Q_prev = details[:Q_prev]
-        q_val = details[:q]
-        g_planned = details[:g_planned]
-        prices = details[:prices]
-        
-        println()
-        println("Clearing #$clearing_idx (Global Hour: $current_hour)")
-        println("-"^80)
-        println()
-        
-        # Print table header
-        println("Hour      q_prev(MW)  λ(€/MWh)    q(MW)   g_plan(MW)    Δ%")
-        println("-"^80)
-        
-        for h in 1:min(24, length(prices))  # Show first 24 hours or less
-            for g in IG
-                q_prev_val = Q_prev[(g, h)]
-                q_adj = q_val[g, h]
-                g_plan = g_planned[g, h]
-                price = prices[h]
+            # Plot q_prev as bars using global hours
+            for local_h in 1:24
+                global_h = clearing_start_hour + local_h - 1
+                value = Q_prev_dict[(gen_name, local_h)]
                 
-                # Calculate adjustment percentage
-                δ_pct = if q_prev_val > 0.001
-                    (q_adj / q_prev_val) * 100
-                else
-                    0.0
+                if value > 0.01
+                    bar_color = :orange
+                    plot!(p_gen, [global_h-0.4, global_h+0.4], [0, 0], fillrange=[0.4, 0.4], 
+                          fillcolor=bar_color, fillalpha=0.6, linewidth=0)
+                    # Add text annotation with value
+                    if value >= 10  # Only show significant values
+                        annotate!(p_gen, global_h, 0, text(@sprintf("%.0f", value), 6, :black))
+                    end
                 end
-                
-                hour_label = string(g, ":h", h)
-                @printf "%8s %12.2f %10.2f %10.2f %10.2f %11.1f%%\n" hour_label q_prev_val price q_adj g_plan δ_pct
             end
         end
         
-        println()
+        # Next rows: q adjustments for each clearing
+        for (row_idx, clearing_num) in enumerate(clearing_indices)
+            if haskey(clearing_details, clearing_num)
+                q_dict = clearing_details[clearing_num][:q]
+                clearing_start_hour = clearing_details[clearing_num][:current_hour]
+                
+                # Plot q adjustments as bars using global hours
+                for local_h in 1:24
+                    global_h = clearing_start_hour + local_h - 1
+                    value = q_dict[gen_name, local_h]
+                    
+                    if abs(value) > 0.01  # Show non-zero adjustments
+                        bar_color = value > 0 ? :lightgreen : :lightcoral
+                        plot!(p_gen, [global_h-0.4, global_h+0.4], [row_idx, row_idx], 
+                              fillrange=[row_idx+0.4, row_idx+0.4], 
+                              fillcolor=bar_color, fillalpha=0.7, linewidth=0)
+                        # Add text annotation with value (show +/-)
+                        sign_str = value > 0 ? "+" : ""
+                        annotate!(p_gen, global_h, row_idx, text(@sprintf("%s%.0f", sign_str, value), 6, :black))
+                    end
+                end
+            end
+        end
+        
+        # Set consistent x-axis limits across all generator plots
+        xlims!(p_gen, start_global_hour - 0.5, end_global_hour + 0.5)
+        ylims!(p_gen, -0.5, num_clearings_to_show + 0.5)
+        
+        push!(subplots, p_gen)
     end
     
-    println("="^80)
+    # Combine all plots with equal height
+    if length(subplots) == 2
+        plot(p1, subplots[1], subplots[2], layout=(3,1), size=(1000, 1200))
+    elseif length(subplots) == 1
+        plot(p1, subplots[1], layout=(2,1), size=(1000, 800))
+    else
+        plot(p1, layout=(1,1), size=(1000, 400))
+    end
 end

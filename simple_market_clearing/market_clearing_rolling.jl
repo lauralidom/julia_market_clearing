@@ -246,9 +246,6 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
 end
 
 println()
-println("Simulation Complete")
-println("Total clearings: $clearing_count")
-println()
 
 # Summary statistics - collect all prices from all clearings
 all_prices = vcat([all_results[:prices][c] for c in 1:clearing_count if haskey(all_results[:prices], c)]...)
