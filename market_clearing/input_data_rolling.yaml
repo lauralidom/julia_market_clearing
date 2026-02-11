@@ -13,9 +13,13 @@ dispatchableGenerators:
   bidPrice: 30 # EUR/MWh
   capacity: 1500 # MW
 
+ Mid:
+  bidPrice: 60 # EUR/MWh
+  capacity: 500 # MW
+
  Peak:
   bidPrice: 100 # EUR/MWh
-  capacity: 700 # MW
+  capacity: 500 # MW
 
 variableGenerators:
   Wind:
@@ -27,7 +31,16 @@ variableGenerators:
       0.40, 0.35, 0.30, 0.30, 0.25, 0.25, 0.20, 0.20,
       0.70, 0.80, 0.85, 0.80, 0.75, 0.70, 0.60, 0.50
     ]
-    
+  Solar:
+    bidPrice: 0         # EUR/MWh
+    capacity: 300        # MW
+    # Generation 7am-7pm, peak at 13h, symmetric, length = 24
+    profile: [
+      0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      0.1, 0.3, 0.5, 0.6, 0.7, 0.8,
+      0.9, 0.8, 0.7, 0.6, 0.5, 0.3,
+      0.1, 0.0, 0.0, 0.0, 0.0, 0.0
+    ]
 
 # Storage parameters
 batteryStorage:

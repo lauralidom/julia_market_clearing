@@ -176,7 +176,8 @@ function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, max_noise_std::
     
     for (gname, gdata_any) in var_gen
         g = String(gname)
-        if g in IG
+        # Only apply noise to Wind - other generators like Solar have deterministic profiles
+        if g in IG && g == "Wind"
             Q = float(gdata_any["capacity"])
             
             # Apply noise to all hours with time-dependent decay

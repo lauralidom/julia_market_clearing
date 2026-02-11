@@ -33,7 +33,7 @@ total_hours = sim_days * 24 + 1
 
 println("Rolling Horizon Market Clearing Simulation")
 println("Simulation: $sim_days days + 1 prep hour | Look-ahead: $look_ahead hours | Reclear frequency: every $reclear_freq hour(s)")
-println("Gate closure: $gate_closure hour(s) | Peak+Wind flexible, Base locked during gate closure")
+println("Gate closure: $gate_closure hour(s) | Peak+Wind flexible, Base+Mid+Solar locked during gate closure")
 println()
 
 # Load the base data structure
@@ -102,8 +102,8 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     # Manually populate time series for this window
     m.ext[:sets][:JH] = 1:look_ahead
     
-    # Prepare Q_prev: shift all commitments forward by reclear_freq hours
-    # This is the financial position from previous clearing
+    # Prepare Q_prev: Drop the executed hours (given by reclear_freq hours) and reindex 
+    # the remaining financial positions relative to the new clearing time 
     Q_prev = prepare_Q_prev_for_next_window(prev_q_financial, look_ahead, IG, reclear_freq)
     
     # Store time series for this window
@@ -123,6 +123,7 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     # Pass gate closure parameter
     m.ext[:parameters][:gate_closure] = gate_closure
     
+
     # Build and solve
     build_market_clearing!(m)
     optimize!(m)
@@ -166,6 +167,7 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     # Extract updated position for next window as financial position
     # g_planned[g,h] from this clearing becomes q_prev[g,h] in next clearing
     prev_q_financial = extract_window_commitments(g_planned_val, IG, look_ahead)
+
     
     # Storage state continuity: pass executed hours SOC to next clearing
     # After reclear_freq hours, we need SOC at the end of those executed hours

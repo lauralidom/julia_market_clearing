@@ -52,7 +52,7 @@ function plot_rolling_horizon_results(all_results::Dict)
     
     # Plot generator position evolution across consecutive clearings
     # Shows how g_planned and q change for each generator
-    generators = ["Peak", "Wind"]
+    generators = ["Mid", "Wind"]
     
     # Create subplots - one for each generator
     subplots = []

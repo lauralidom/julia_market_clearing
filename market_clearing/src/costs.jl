@@ -3,7 +3,6 @@ using XLSX
 
 
 function calculate_system_costs(all_results::Dict, cfg::Dict)
-    dispatch_dict = all_results[:dispatch]
     clearing_details = all_results[:clearing_details]
     
     # Get generator bid prices
@@ -18,32 +17,89 @@ function calculate_system_costs(all_results::Dict, cfg::Dict)
         gen_prices[String(gname)] = float(gdata["bidPrice"])
     end
     
-    # Track costs by generator
+    # Track costs by generator across ALL delivered hours
     gen_costs = Dict{String, Float64}()
     for g in keys(gen_prices)
         gen_costs[g] = 0.0
     end
     
-    # Sum costs across all clearings (hour 1 = executed dispatch)
-    for clearing_num in sort(collect(keys(dispatch_dict)))
-        clearing_data = dispatch_dict[clearing_num]
+    # Get reclear frequency from config to determine how many hours executed per clearing
+    reclear_freq = Int(cfg["rolling_horizon"]["reclear_frequency"])
+    
+    # Sum costs across all DELIVERED hours (accounting for reclear frequency)
+    # Each clearing executes reclear_freq hours (hours 1 through reclear_freq)
+    for clearing_num in sort(collect(keys(clearing_details)))
+        details = clearing_details[clearing_num]
+        g_planned = details[:g_planned]  # Final committed position for each hour
         
-        for (gen, dispatch_vector) in clearing_data
-            if haskey(gen_prices, gen)
-                # Hour 1 is the executed dispatch for this clearing
-                executed_dispatch = dispatch_vector[1]  # MWh
-                cost = executed_dispatch * gen_prices[gen]  # EUR
+        # Sum cost for all executed hours in this clearing (1 to reclear_freq)
+        for h in 1:reclear_freq
+            for (gen, bid_price) in gen_prices
+                delivered_dispatch = g_planned[gen, h]  # MWh
+                cost = delivered_dispatch * bid_price    # EUR
                 gen_costs[gen] += cost
             end
         end
     end
     
     total_cost = sum(values(gen_costs))
+    total_hours_delivered = length(clearing_details) * reclear_freq
     
     return Dict(
         :generator_costs => gen_costs,
         :total_cost => total_cost,
-        :total_clearings => length(dispatch_dict)
+        :total_clearings => length(clearing_details),
+        :total_hours_delivered => total_hours_delivered
+    )
+end
+
+
+function calculate_generator_revenues_executed(all_results::Dict, cfg::Dict)
+    clearing_details = all_results[:clearing_details]
+    prices_dict = all_results[:prices]
+    dispatch_dict = all_results[:dispatch]
+    
+    # Track revenue by generator for executed hours only
+    gen_revenues = Dict{String, Float64}()
+    gen_energy = Dict{String, Float64}()
+    
+    # Get reclear frequency to determine how many hours executed per clearing
+    reclear_freq = Int(cfg["rolling_horizon"]["reclear_frequency"])
+    
+    # Sum revenues across all executed hours (1 through reclear_freq for each clearing)
+    for clearing_num in sort(collect(keys(clearing_details)))
+        details = clearing_details[clearing_num]
+        g_planned = details[:g_planned]
+        prices = prices_dict[clearing_num]
+        
+        # Get generators from dispatch_dict (regular Dict, easier to iterate)
+        gens = collect(keys(dispatch_dict[clearing_num]))
+        
+        for gen in gens
+            if !haskey(gen_revenues, gen)
+                gen_revenues[gen] = 0.0
+                gen_energy[gen] = 0.0
+            end
+            
+            # Sum over executed hours (1 to reclear_freq)
+            for h in 1:reclear_freq
+                executed_dispatch = g_planned[gen, h]  # MWh
+                price = prices[h]  # EUR/MWh
+                revenue = executed_dispatch * price  # EUR
+                
+                gen_revenues[gen] += revenue
+                gen_energy[gen] += executed_dispatch
+            end
+        end
+    end
+    
+    total_revenue = sum(values(gen_revenues))
+    
+    return Dict(
+        :generator_revenues => gen_revenues,
+        :generator_energy => gen_energy,
+        :total_revenue => total_revenue,
+        :total_clearings => length(clearing_details)
     )
 end
 
@@ -112,26 +168,31 @@ function calculate_storage_revenue(all_results::Dict, cfg::Dict)
     total_discharge_energy = 0.0
     total_charging_energy = 0.0
     
-    # For each clearing, use hour 1 as the executed operation
+    # Get reclear frequency to determine how many hours executed per clearing
+    reclear_freq = Int(cfg["rolling_horizon"]["reclear_frequency"])
+    
+    # For each clearing, use hours 1 through reclear_freq as the executed operations
     for clearing_num in sort(collect(keys(clearing_details)))
         details = clearing_details[clearing_num]
         prices = prices_dict[clearing_num]
         
-        # Hour 1 values (executed)
-        discharge_mw = details[:discharging][1]
-        charge_mw = details[:charging][1]
-        price = prices[1]  # EUR/MWh
-        
-        # Revenue from discharging
-        discharge_revenue = discharge_mw * price
-        
-        # Cost of charging (need to buy power at market price)
-        charging_cost = charge_mw * price
-        
-        total_discharge_revenue += discharge_revenue
-        total_charging_cost += charging_cost
-        total_discharge_energy += discharge_mw
-        total_charging_energy += charge_mw
+        # Sum over all executed hours (1 to reclear_freq)
+        for h in 1:reclear_freq
+            discharge_mw = details[:discharging][h]
+            charge_mw = details[:charging][h]
+            price = prices[h]  # EUR/MWh
+            
+            # Revenue from discharging
+            discharge_revenue = discharge_mw * price
+            
+            # Cost of charging (need to buy power at market price)
+            charging_cost = charge_mw * price
+            
+            total_discharge_revenue += discharge_revenue
+            total_charging_cost += charging_cost
+            total_discharge_energy += discharge_mw
+            total_charging_energy += charge_mw
+        end
     end
     
     net_revenue = total_discharge_revenue - total_charging_cost
@@ -149,7 +210,7 @@ function calculate_storage_revenue(all_results::Dict, cfg::Dict)
 end
 
 
-function compute_delivery_hour_ledger(all_results::Dict)
+function compute_delivery_hour_ledger(all_results::Dict, cfg::Dict)
     clearing_times = all_results[:clearing_times]
     prices_dict = all_results[:prices]
     details_dict = all_results[:clearing_details]
@@ -158,6 +219,9 @@ function compute_delivery_hour_ledger(all_results::Dict)
     ledger = Dict{Tuple{String,Int}, Dict{Symbol,Float64}}()
     executed = Dict{Tuple{String,Int}, Float64}()
     exec_price = Dict{Int, Float64}()
+    
+    # Get reclear frequency to determine how many hours are executed per clearing
+    reclear_freq = Int(cfg["rolling_horizon"]["reclear_frequency"])
 
     for c_num in sort(collect(keys(details_dict)))
         start = clearing_times[c_num]
@@ -183,12 +247,14 @@ function compute_delivery_hour_ledger(all_results::Dict)
             end
         end
 
-        # Capture executed position and delivery price for the delivery hour = start
-        price1 = prices[1]
-        exec_price[start] = price1
+        # Capture executed position and delivery price for ALL executed hours (1 to reclear_freq)
         g_planned = details_dict[c_num][:g_planned]
-        for gen in gens
-            executed[(gen, start)] = g_planned[gen, 1]
+        for h in 1:reclear_freq
+            globalH = start + (h - 1)
+            exec_price[globalH] = prices[h]
+            for gen in gens
+                executed[(gen, globalH)] = g_planned[gen, h]
+            end
         end
     end
 
@@ -196,8 +262,8 @@ function compute_delivery_hour_ledger(all_results::Dict)
 end
 
 
-function print_delivery_hour_audit(all_results::Dict)
-    ledger, executed, _ = compute_delivery_hour_ledger(all_results)
+function print_delivery_hour_audit(all_results::Dict, cfg::Dict)
+    ledger, executed, _ = compute_delivery_hour_ledger(all_results, cfg)
 
     # Determine executed hours set
     executed_hours = unique(h for (_, h) in keys(executed))
@@ -229,6 +295,7 @@ end
 
 function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String="economic_summary.xlsx")
     costs = calculate_system_costs(all_results, cfg)
+    revenues_exec = calculate_generator_revenues_executed(all_results, cfg)
     revenues_full = calculate_generator_revenues_full(all_results)
     storage = calculate_storage_revenue(all_results, cfg)
 
@@ -250,8 +317,18 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
         # Title
         write_text!(sh, row, "ECONOMIC SUMMARY"); row += 2
 
-        # GENERATOR REVENUES (sum(q*price) across all clearings)
-        write_text!(sh, row, "GENERATOR REVENUES (sum(q*price) across all clearings)"); row += 1
+        # PRODUCER REVENUES (Executed-only)
+        write_text!(sh, row, "PRODUCER REVENUES (Executed-only)"); row += 1
+        write_row!(sh, row, Any["Generator", "Energy (MWh)", "Revenue (EUR)", "Avg Price"]); row += 1
+        for (gen, revenue) in sort(collect(revenues_exec[:generator_revenues]))
+            energy = revenues_exec[:generator_energy][gen]
+            avg_price = energy > 0 ? revenue / energy : 0.0
+            write_row!(sh, row, Any[gen, energy, revenue, avg_price]); row += 1
+        end
+        write_row!(sh, row, Any["Total", sum(values(revenues_exec[:generator_energy])), revenues_exec[:total_revenue]]); row += 2
+
+        # TOTAL FINANCIAL REVENUE (incl financial repositions → sum(q*price))
+        write_text!(sh, row, "TOTAL FINANCIAL REVENUE (incl financial repositions → sum(q*price))"); row += 1
         write_row!(sh, row, Any["Generator", "Net Revenue", "Net Traded", "Gross Traded"]); row += 1
         for (gen, revenue) in sort(collect(revenues_full[:generator_revenues]))
             net_trade = revenues_full[:traded_net][gen]
@@ -294,7 +371,7 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
         # DELIVERY-HOUR AUDIT
         write_text!(sh, row, "DELIVERY-HOUR AUDIT (sum of trades vs executed)"); row += 1
         # Recompute audit aggregates
-        ledger, executed, _ = compute_delivery_hour_ledger(all_results)
+        ledger, executed, _ = compute_delivery_hour_ledger(all_results, cfg)
         executed_hours = unique(h for (_, h) in keys(executed))
         gens = unique(first(k) for k in keys(executed))
         write_row!(sh, row, Any["Generator", "Σ net trades", "Σ executed", "Max |Δ| per hour"]); row += 1
@@ -316,6 +393,7 @@ end
 
 function print_cost_summary(all_results::Dict, cfg::Dict)
     costs = calculate_system_costs(all_results, cfg)
+    revenues_exec = calculate_generator_revenues_executed(all_results, cfg)
     revenues_full = calculate_generator_revenues_full(all_results)
     storage = calculate_storage_revenue(all_results, cfg)
 
@@ -325,7 +403,20 @@ function print_cost_summary(all_results::Dict, cfg::Dict)
     println("="^80)
     println()
 
-    println("GENERATOR REVENUES (sum(q*price) across all clearings)")
+    println("PRODUCER REVENUES (Executed-only)")
+    println("-"^80)
+    @printf "%-20s %12s %12s %12s\n" "Generator" "Energy (MWh)" "Revenue (EUR)" "Avg Price"
+    println("-"^80)
+    for (gen, revenue) in sort(collect(revenues_exec[:generator_revenues]))
+        energy = revenues_exec[:generator_energy][gen]
+        avg_price = energy > 0 ? revenue / energy : 0.0
+        @printf "%-20s %12.2f %12.2f %12.2f\n" gen energy revenue avg_price
+    end
+    println("-"^80)
+    @printf "%-20s %12.2f %12.2f\n" "Total" sum(values(revenues_exec[:generator_energy])) revenues_exec[:total_revenue]
+
+    println()
+    println("TOTAL FINANCIAL REVENUE (incl financial repositions → sum(q*price))")
     println("-"^80)
     @printf "%-20s %12s %12s %12s\n" "Generator" "Net Revenue" "Net Traded" "Gross Traded"
     println("-"^80)
@@ -391,7 +482,7 @@ function print_cost_summary(all_results::Dict, cfg::Dict)
     @printf "%-30s: %12.2f EUR\n" "Total Generator Profit" total_profit_summary
 
     # Top delivery hours by absolute cashflow
-    ledger, _, exec_price = compute_delivery_hour_ledger(all_results)
+    ledger, _, exec_price = compute_delivery_hour_ledger(all_results, cfg)
     cash_by_hour = Dict{Int, Float64}()
     gross_by_hour = Dict{Int, Float64}()
     for ((_, H), rec) in ledger
@@ -417,5 +508,5 @@ function print_cost_summary(all_results::Dict, cfg::Dict)
     println("="^80)
 
     # Compact audit at the end
-    print_delivery_hour_audit(all_results)
+    print_delivery_hour_audit(all_results, cfg)
 end

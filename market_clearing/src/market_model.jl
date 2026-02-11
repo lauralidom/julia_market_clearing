@@ -30,14 +30,14 @@ function build_market_clearing!(m::Model)
     # Qd[d,h] = served demand of segment d in hour h [MW]
     Qd = m.ext[:variables][:Qd] = @variable(m, Qd[d in ID, h in JH] >= 0)
 
-    # q[g,h] = intraday adjustment trade relative to financial position q_prev [MW]
+    # q[g,h] = generator adjustment trade relative to financial position q_prev [MW]
     # q < 0 means buy-back; q > 0 means sell more
     q = m.ext[:variables][:q] = @variable(m, q[g in IG, h in JH])
 
     # g_planned[g,h] = updated position (commitments + adjustment) [MW]
     g_planned = m.ext[:variables][:g_planned] = @variable(m, g_planned[g in IG, h in JH] >= 0)
 
-    # Step 3: Storage variables
+    # Step 3: Storage parameters
     E_cap = m.ext[:parameters][:storage_energy_capacity]
     P_cap = m.ext[:parameters][:storage_power_capacity]
     η = m.ext[:parameters][:storage_efficiency]
@@ -97,7 +97,8 @@ function build_market_clearing!(m::Model)
 
     # Step 10: Rolling horizon gate closure constraints
     # Gate closure locks dispatchable generators except Peak
-    # Peak remains flexible to balance last-minute wind forecast updates
+    # Peak remains flexible to balance demand/supply
+    # Wind remains flexible because of stochastic forecast updates
     # q[g,h] = 0 means g_planned[g,h] = q_prev[g,h] (locked to previous commitment)
     gate_closure = m.ext[:parameters][:gate_closure]
     m.ext[:constraints][:no_trade_locked_hours] = @constraint(
