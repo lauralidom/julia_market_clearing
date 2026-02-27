@@ -61,25 +61,11 @@ function ClearRolling(data, with_ramps)
 	    # println("Termination status: ", termination_status(m))
 	    # println("Objective value: ", objective_value(m))
 
+	    # collect data for future analysis
 	    ProcessData.AddToResultSet!(resultset, m, t)
 
+	    # feed forward SOC for consideration in next clearing
 	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
-	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
-	    
-	    # println("SOC: ", previous_time_period_data)
-
-
-
-	    # next up, plot some things
-	    # could this be configurable based on yaml input?
-	    
-	    
-	    # these display themselves, should they??
-	    
-	    for iter in m.ext[:sets][:CH]
-	        # PlotHourlyMarketEquilibrium.plot(m,iter)
-	    end
-	    
 	    
 	end
 

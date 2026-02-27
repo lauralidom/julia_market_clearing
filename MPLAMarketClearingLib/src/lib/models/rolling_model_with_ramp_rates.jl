@@ -249,7 +249,7 @@ function build_market_clearing!(m::Model, start_at_period::Int)
         Qg[g,t] <= Q_gen[(String(g),t)]
     )
 
-    # using DG here so this only applies to the dispatchable gens
+    # Ramp Limits - using DG here so this only applies to the dispatchable gens
 
     m.ext[:constraints][:ramp_limits] = @constraint(
         m, [g in DG, t in range(CH[1],CH[1])], # for the first hour

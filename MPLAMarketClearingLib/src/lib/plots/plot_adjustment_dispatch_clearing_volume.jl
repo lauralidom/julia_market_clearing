@@ -35,7 +35,7 @@ function plot(resultset)
 
     # Create stacked area plot
     p3 = Plots.plot(xlabel="Time Period", ylabel="Volume Traded (MWh)",
-            title="Quantities Dispatched",
+            title="Quantities Traded (All)",
             legend=:topright)
 
     # Stack manually using areaplot with seriestype
@@ -62,7 +62,7 @@ function plot(resultset)
 
     # Create stacked area plot
     p4 = Plots.plot(xlabel="Time Period", ylabel="Volume Traded by Wind (MWh)",
-            title="Quantities Dispatched",
+            title="Quantities Traded (Wind)",
             legend=:topright)
 
     # Stack manually using areaplot with seriestype

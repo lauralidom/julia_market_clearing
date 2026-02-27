@@ -130,8 +130,6 @@ function Transactions(clearingData, resultset)
 
 	end
 
-
-
 	# for each generator, in each time period cleared
 	for (g, gen_qs) in clearingData.GenData
 		for (t, Qg) in enumerate(gen_qs)
