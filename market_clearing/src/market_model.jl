@@ -95,18 +95,44 @@ function build_market_clearing!(m::Model)
         SOC[h] == SOC[h-1] + η * Qch[h] - Qdis[h] / η
     )
 
-    # Step 10: Rolling horizon gate closure constraints
-    # Gate closure locks dispatchable generators except Peak
-    # Peak remains flexible to balance demand/supply
-    # Wind remains flexible because of stochastic forecast updates
+    # Step 10: Ramping constraints for dispatchable generators
+    # Limit how quickly generators can change their output between consecutive hours
+    ramp_rate = m.ext[:parameters][:ramp_rate]
+    g_init = m.ext[:parameters][:generator_initial_dispatch]  # Initial dispatch from previous hour
+    
+    # For h=1, compare against previous hour's dispatch (from earlier clearing)
+    # Combined double inequality constraint: g_init - ramp_rate <= g_planned[g,1] <= g_init + ramp_rate
+    m.ext[:constraints][:ramp_limits_h1] = @constraint(
+        m, [g in IG; haskey(ramp_rate, String(g))],
+        g_init[String(g)] - ramp_rate[String(g)] <= g_planned[g, 1] <= g_init[String(g)] + ramp_rate[String(g)]
+    )
+    
+    # For h>1, compare against previous hour within this optimization window
+    # Ramp up limit: g_planned[g,h] <= g_planned[g,h-1] + ramp_rate
+    m.ext[:constraints][:ramp_up] = @constraint(
+        m, [g in IG, h in JH; h > 1 && haskey(ramp_rate, String(g))],
+        g_planned[g, h] <= g_planned[g, h-1] + ramp_rate[String(g)]
+    )
+    
+    # Ramp down limit: g_planned[g,h] >= g_planned[g,h-1] - ramp_rate
+    m.ext[:constraints][:ramp_down] = @constraint(
+        m, [g in IG, h in JH; h > 1 && haskey(ramp_rate, String(g))],
+        g_planned[g, h] >= g_planned[g, h-1] - ramp_rate[String(g)]
+    )
+
+    # Step 11: Rolling horizon gate closure constraints
+    # Gate closure locks dispatchable generators except Peak, Wind, and those in startup
+    # Generators in startup are kept flexible to avoid locking them to commitments
+    # they physically cannot deliver due to capacity = 0 during warmup period
     # q[g,h] = 0 means g_planned[g,h] = q_prev[g,h] (locked to previous commitment)
     gate_closure = m.ext[:parameters][:gate_closure]
+    flexible_gens = m.ext[:parameters][:flexible_generators]
     m.ext[:constraints][:no_trade_locked_hours] = @constraint(
-        m, [g in IG, h in JH; h <= gate_closure && String(g) != "Peak" && String(g) != "Wind"],
+        m, [g in IG, h in JH; h <= gate_closure && !(String(g) in flexible_gens)],
         q[g,h] == 0
     )
 
-    # Step 11: Welfare objective (physical costs and demand value only)
+    # Step 12: Welfare objective (physical costs and demand value only)
     m.ext[:objective] = @objective(m, Max,
         sum(Pr_dem[(String(d),h)] * Qd[d,h] for d in ID, h in JH) -
         sum(Pr_gen[(String(g),h)] * g_planned[g,h] for g in IG, h in JH)

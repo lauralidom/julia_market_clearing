@@ -54,6 +54,81 @@ function calculate_system_costs(all_results::Dict, cfg::Dict)
 end
 
 
+function calculate_demand_value(all_results::Dict, cfg::Dict)
+    clearing_details = all_results[:clearing_details]
+    
+    # Get demand segment bid prices
+    demand_segments = cfg["demand"]["segments"]
+    
+    dem_prices = Dict{String, Float64}()
+    for (dname, ddata) in demand_segments
+        dem_prices[String(dname)] = float(ddata["bidPrice"])
+    end
+    
+    # Track value by demand segment across ALL delivered hours
+    dem_values = Dict{String, Float64}()
+    dem_served = Dict{String, Float64}()
+    for d in keys(dem_prices)
+        dem_values[d] = 0.0
+        dem_served[d] = 0.0
+    end
+    
+    # Get reclear frequency from config to determine how many hours executed per clearing
+    reclear_freq = Int(cfg["rolling_horizon"]["reclear_frequency"])
+    
+    # Map demand segment names to their storage keys in clearing_details
+    dem_keys = Dict("Base" => :demand_base, "Flex" => :demand_flex)
+    
+    # Sum demand value across all DELIVERED hours (accounting for reclear frequency)
+    # Each clearing executes reclear_freq hours (hours 1 through reclear_freq)
+    for clearing_num in sort(collect(keys(clearing_details)))
+        details = clearing_details[clearing_num]
+        
+        # Sum value for all executed hours in this clearing (1 to reclear_freq)
+        for h in 1:reclear_freq
+            for (dem, bid_price) in dem_prices
+                # Get the served demand from the stored array
+                demand_key = dem_keys[dem]
+                served_demand = details[demand_key][h]  # MWh
+                value = served_demand * bid_price  # EUR
+                dem_values[dem] += value
+                dem_served[dem] += served_demand
+            end
+        end
+    end
+    
+    total_demand_value = sum(values(dem_values))
+    total_demand_served = sum(values(dem_served))
+    total_hours_delivered = length(clearing_details) * reclear_freq
+    
+    return Dict(
+        :demand_segment_values => dem_values,
+        :demand_segment_served => dem_served,
+        :total_demand_value => total_demand_value,
+        :total_demand_served => total_demand_served,
+        :total_clearings => length(clearing_details),
+        :total_hours_delivered => total_hours_delivered
+    )
+end
+
+
+function calculate_social_welfare(all_results::Dict, cfg::Dict)
+    # Social welfare = total demand value - total generation costs
+    demand_results = calculate_demand_value(all_results, cfg)
+    cost_results = calculate_system_costs(all_results, cfg)
+    
+    total_welfare = demand_results[:total_demand_value] - cost_results[:total_cost]
+    
+    return Dict(
+        :total_demand_value => demand_results[:total_demand_value],
+        :total_generation_cost => cost_results[:total_cost],
+        :social_welfare => total_welfare,
+        :demand_details => demand_results,
+        :cost_details => cost_results
+    )
+end
+
+
 function calculate_generator_revenues_executed(all_results::Dict, cfg::Dict)
     clearing_details = all_results[:clearing_details]
     prices_dict = all_results[:prices]
@@ -293,11 +368,83 @@ function print_delivery_hour_audit(all_results::Dict, cfg::Dict)
 end
 
 
+function calculate_average_daily_metrics(all_results::Dict, cfg::Dict)
+    sim_days = Int(cfg["rolling_horizon"]["simulation_days"])
+    
+    costs = calculate_system_costs(all_results, cfg)
+    revenues_exec = calculate_generator_revenues_executed(all_results, cfg)
+    revenues_full = calculate_generator_revenues_full(all_results)
+    storage = calculate_storage_revenue(all_results, cfg)
+    welfare = calculate_social_welfare(all_results, cfg)
+    
+    # Normalize generator costs to daily average
+    daily_gen_costs = Dict{String, Float64}()
+    for (gen, cost) in costs[:generator_costs]
+        daily_gen_costs[gen] = cost / sim_days
+    end
+    
+    # Normalize generator revenues (executed)
+    daily_gen_revenues_exec = Dict{String, Float64}()
+    daily_gen_energy_exec = Dict{String, Float64}()
+    for (gen, revenue) in revenues_exec[:generator_revenues]
+        daily_gen_revenues_exec[gen] = revenue / sim_days
+        daily_gen_energy_exec[gen] = revenues_exec[:generator_energy][gen] / sim_days
+    end
+    
+    # Normalize generator revenues (full financial)
+    daily_gen_revenues_full = Dict{String, Float64}()
+    daily_traded_net = Dict{String, Float64}()
+    daily_traded_gross = Dict{String, Float64}()
+    for (gen, revenue) in revenues_full[:generator_revenues]
+        daily_gen_revenues_full[gen] = revenue / sim_days
+        daily_traded_net[gen] = revenues_full[:traded_net][gen] / sim_days
+        daily_traded_gross[gen] = revenues_full[:traded_gross][gen] / sim_days
+    end
+    
+    # Normalize storage metrics
+    daily_storage = Dict(
+        :discharge_revenue => storage[:discharge_revenue] / sim_days,
+        :charging_cost => storage[:charging_cost] / sim_days,
+        :net_revenue => storage[:net_revenue] / sim_days,
+        :discharge_energy => storage[:total_discharge_energy] / sim_days,
+        :charging_energy => storage[:total_charging_energy] / sim_days,
+        :avg_discharge_price => storage[:avg_discharge_price],  # Price averages don't change
+        :avg_charging_price => storage[:avg_charging_price]      # Price averages don't change
+    )
+    
+    # Normalize welfare metrics
+    daily_welfare = Dict(
+        :social_welfare => welfare[:social_welfare] / sim_days,
+        :demand_value => welfare[:total_demand_value] / sim_days,
+        :generation_cost => welfare[:total_generation_cost] / sim_days
+    )
+    
+    return Dict(
+        :sim_days => sim_days,
+        :daily_total_cost => costs[:total_cost] / sim_days,
+        :daily_gen_costs => daily_gen_costs,
+        :daily_gen_revenues_exec => daily_gen_revenues_exec,
+        :daily_gen_energy_exec => daily_gen_energy_exec,
+        :daily_total_revenue_exec => revenues_exec[:total_revenue] / sim_days,
+        :daily_gen_revenues_full => daily_gen_revenues_full,
+        :daily_traded_net => daily_traded_net,
+        :daily_traded_gross => daily_traded_gross,
+        :daily_total_revenue_full => revenues_full[:total_revenue] / sim_days,
+        :daily_storage => daily_storage,
+        :daily_welfare => daily_welfare
+    )
+end
+
+
 function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String="economic_summary.xlsx")
     costs = calculate_system_costs(all_results, cfg)
     revenues_exec = calculate_generator_revenues_executed(all_results, cfg)
     revenues_full = calculate_generator_revenues_full(all_results)
     storage = calculate_storage_revenue(all_results, cfg)
+    welfare = calculate_social_welfare(all_results, cfg)
+    daily_metrics = calculate_average_daily_metrics(all_results, cfg)
+    
+    sim_days = daily_metrics[:sim_days]
 
     # Helpers
     col_label(n::Int) = begin
@@ -315,58 +462,74 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
         row = 1
 
         # Title
-        write_text!(sh, row, "ECONOMIC SUMMARY"); row += 2
+        write_text!(sh, row, "ECONOMIC SUMMARY ($(sim_days) days simulation)"); row += 2
 
         # PRODUCER REVENUES (Executed-only)
         write_text!(sh, row, "PRODUCER REVENUES (Executed-only)"); row += 1
-        write_row!(sh, row, Any["Generator", "Energy (MWh)", "Revenue (EUR)", "Avg Price"]); row += 1
+        write_row!(sh, row, Any["Generator", "Energy (MWh)", "Revenue (EUR)", "Avg Price", "Revenue/Day (EUR)"]); row += 1
         for (gen, revenue) in sort(collect(revenues_exec[:generator_revenues]))
             energy = revenues_exec[:generator_energy][gen]
             avg_price = energy > 0 ? revenue / energy : 0.0
-            write_row!(sh, row, Any[gen, energy, revenue, avg_price]); row += 1
+            daily_rev = daily_metrics[:daily_gen_revenues_exec][gen]
+            write_row!(sh, row, Any[gen, energy, revenue, avg_price, daily_rev]); row += 1
         end
-        write_row!(sh, row, Any["Total", sum(values(revenues_exec[:generator_energy])), revenues_exec[:total_revenue]]); row += 2
+        write_row!(sh, row, Any["Total", sum(values(revenues_exec[:generator_energy])), revenues_exec[:total_revenue], "", daily_metrics[:daily_total_revenue_exec]]); row += 2
 
         # TOTAL FINANCIAL REVENUE (incl financial repositions → sum(q*price))
         write_text!(sh, row, "TOTAL FINANCIAL REVENUE (incl financial repositions → sum(q*price))"); row += 1
-        write_row!(sh, row, Any["Generator", "Net Revenue", "Net Traded", "Gross Traded"]); row += 1
+        write_row!(sh, row, Any["Generator", "Net Revenue", "Net Traded", "Gross Traded", "Revenue/Day"]); row += 1
         for (gen, revenue) in sort(collect(revenues_full[:generator_revenues]))
             net_trade = revenues_full[:traded_net][gen]
             gross_trade = revenues_full[:traded_gross][gen]
-            write_row!(sh, row, Any[gen, revenue, net_trade, gross_trade]); row += 1
+            daily_rev = daily_metrics[:daily_gen_revenues_full][gen]
+            write_row!(sh, row, Any[gen, revenue, net_trade, gross_trade, daily_rev]); row += 1
         end
-        write_row!(sh, row, Any["Total Net Revenue", revenues_full[:total_revenue]]); row += 2
+        write_row!(sh, row, Any["Total Net Revenue", revenues_full[:total_revenue], "", "", daily_metrics[:daily_total_revenue_full]]); row += 2
 
         # GENERATOR COSTS (Production Costs)
         write_text!(sh, row, "GENERATOR COSTS (Production Costs)"); row += 1
+        write_row!(sh, row, Any["Generator", "Total Cost (EUR)", "Cost/Day (EUR)"]); row += 1
         for (gen, cost) in sort(collect(costs[:generator_costs]))
-            write_row!(sh, row, Any[gen, cost]); row += 1
+            daily_cost = daily_metrics[:daily_gen_costs][gen]
+            write_row!(sh, row, Any[gen, cost, daily_cost]); row += 1
         end
-        write_row!(sh, row, Any["Total System Cost", costs[:total_cost]]); row += 1
-        write_row!(sh, row, Any["Average per Clearing", costs[:total_cost] / costs[:total_clearings]]); row += 2
+        write_row!(sh, row, Any["Total System Cost", costs[:total_cost], daily_metrics[:daily_total_cost]]); row += 1
+        write_row!(sh, row, Any["Average per Clearing", costs[:total_cost] / costs[:total_clearings], ""]); row += 2
+
+        # SOCIAL WELFARE
+        write_text!(sh, row, "SOCIAL WELFARE"); row += 1
+        write_row!(sh, row, Any["Metric", "Total (EUR)", "Per Day (EUR)"]); row += 1
+        write_row!(sh, row, Any["Total Demand Value", welfare[:total_demand_value], daily_metrics[:daily_welfare][:demand_value]]); row += 1
+        write_row!(sh, row, Any["Total Generation Cost", welfare[:total_generation_cost], daily_metrics[:daily_welfare][:generation_cost]]); row += 1
+        write_row!(sh, row, Any["Social Welfare", welfare[:social_welfare], daily_metrics[:daily_welfare][:social_welfare]]); row += 2
 
         # GENERATOR PROFITS (Full Revenue - Cost)
         write_text!(sh, row, "GENERATOR PROFITS (Full Revenue - Cost)"); row += 1
+        write_row!(sh, row, Any["Generator", "Total Profit (EUR)", "Profit/Day (EUR)"]); row += 1
         total_profit = 0.0
+        total_daily_profit = 0.0
         for gen in sort(collect(keys(revenues_full[:generator_revenues])))
             revenue = revenues_full[:generator_revenues][gen]
             cost = haskey(costs[:generator_costs], gen) ? costs[:generator_costs][gen] : 0.0
             profit = revenue - cost
+            daily_profit = profit / sim_days
             total_profit += profit
-            write_row!(sh, row, Any[gen, profit]); row += 1
+            total_daily_profit += daily_profit
+            write_row!(sh, row, Any[gen, profit, daily_profit]); row += 1
         end
-        write_row!(sh, row, Any["Total Generator Profit", total_profit]); row += 2
+        write_row!(sh, row, Any["Total Generator Profit", total_profit, total_daily_profit]); row += 2
 
         # STORAGE REVENUE
         write_text!(sh, row, "STORAGE REVENUE"); row += 1
-        write_row!(sh, row, Any["Total Energy Discharged (MWh)", storage[:total_discharge_energy]]); row += 1
-        write_row!(sh, row, Any["Total Energy Charged (MWh)", storage[:total_charging_energy]]); row += 1
-        write_row!(sh, row, Any["Avg Discharge Price (EUR/MWh)", storage[:avg_discharge_price]]); row += 1
-        write_row!(sh, row, Any["Avg Charging Price (EUR/MWh)", storage[:avg_charging_price]]); row += 1
-        write_row!(sh, row, Any["Discharge Revenue (EUR)", storage[:discharge_revenue]]); row += 1
-        write_row!(sh, row, Any["Charging Cost (EUR)", storage[:charging_cost]]); row += 1
-        write_row!(sh, row, Any["Net Storage Revenue (EUR)", storage[:net_revenue]]); row += 1
-        write_row!(sh, row, Any["Average per Clearing (EUR)", storage[:net_revenue] / storage[:total_clearings]]); row += 2
+        write_row!(sh, row, Any["Metric", "Total", "Per Day"]); row += 1
+        write_row!(sh, row, Any["Energy Discharged (MWh)", storage[:total_discharge_energy], daily_metrics[:daily_storage][:discharge_energy]]); row += 1
+        write_row!(sh, row, Any["Energy Charged (MWh)", storage[:total_charging_energy], daily_metrics[:daily_storage][:charging_energy]]); row += 1
+        write_row!(sh, row, Any["Avg Discharge Price (EUR/MWh)", storage[:avg_discharge_price], ""]); row += 1
+        write_row!(sh, row, Any["Avg Charging Price (EUR/MWh)", storage[:avg_charging_price], ""]); row += 1
+        write_row!(sh, row, Any["Discharge Revenue (EUR)", storage[:discharge_revenue], daily_metrics[:daily_storage][:discharge_revenue]]); row += 1
+        write_row!(sh, row, Any["Charging Cost (EUR)", storage[:charging_cost], daily_metrics[:daily_storage][:charging_cost]]); row += 1
+        write_row!(sh, row, Any["Net Storage Revenue (EUR)", storage[:net_revenue], daily_metrics[:daily_storage][:net_revenue]]); row += 1
+        write_row!(sh, row, Any["Average per Clearing (EUR)", storage[:net_revenue] / storage[:total_clearings], ""]); row += 2
 
         # DELIVERY-HOUR AUDIT
         write_text!(sh, row, "DELIVERY-HOUR AUDIT (sum of trades vs executed)"); row += 1
@@ -396,90 +559,113 @@ function print_cost_summary(all_results::Dict, cfg::Dict)
     revenues_exec = calculate_generator_revenues_executed(all_results, cfg)
     revenues_full = calculate_generator_revenues_full(all_results)
     storage = calculate_storage_revenue(all_results, cfg)
+    welfare = calculate_social_welfare(all_results, cfg)
+    daily_metrics = calculate_average_daily_metrics(all_results, cfg)
+    
+    sim_days = daily_metrics[:sim_days]
 
     println()
     println("="^80)
-    println("ECONOMIC SUMMARY")
+    println("ECONOMIC SUMMARY ($(sim_days) days simulation)")
     println("="^80)
     println()
 
     println("PRODUCER REVENUES (Executed-only)")
     println("-"^80)
-    @printf "%-20s %12s %12s %12s\n" "Generator" "Energy (MWh)" "Revenue (EUR)" "Avg Price"
+    @printf "%-20s %12s %12s %12s %12s\n" "Generator" "Energy (MWh)" "Revenue (EUR)" "Avg Price" "Rev/Day (EUR)"
     println("-"^80)
     for (gen, revenue) in sort(collect(revenues_exec[:generator_revenues]))
         energy = revenues_exec[:generator_energy][gen]
         avg_price = energy > 0 ? revenue / energy : 0.0
-        @printf "%-20s %12.2f %12.2f %12.2f\n" gen energy revenue avg_price
+        daily_rev = daily_metrics[:daily_gen_revenues_exec][gen]
+        @printf "%-20s %12.2f %12.2f %12.2f %12.2f\n" gen energy revenue avg_price daily_rev
     end
     println("-"^80)
-    @printf "%-20s %12.2f %12.2f\n" "Total" sum(values(revenues_exec[:generator_energy])) revenues_exec[:total_revenue]
+    @printf "%-20s %12.2f %12.2f %12s %12.2f\n" "Total" sum(values(revenues_exec[:generator_energy])) revenues_exec[:total_revenue] "" daily_metrics[:daily_total_revenue_exec]
 
     println()
     println("TOTAL FINANCIAL REVENUE (incl financial repositions → sum(q*price))")
     println("-"^80)
-    @printf "%-20s %12s %12s %12s\n" "Generator" "Net Revenue" "Net Traded" "Gross Traded"
+    @printf "%-20s %12s %12s %12s %12s\n" "Generator" "Net Revenue" "Net Traded" "Gross Traded" "Rev/Day"
     println("-"^80)
     for (gen, revenue) in sort(collect(revenues_full[:generator_revenues]))
         net_trade = revenues_full[:traded_net][gen]
         gross_trade = revenues_full[:traded_gross][gen]
-        @printf "%-20s %12.2f %12.2f %12.2f\n" gen revenue net_trade gross_trade
+        daily_rev = daily_metrics[:daily_gen_revenues_full][gen]
+        @printf "%-20s %12.2f %12.2f %12.2f %12.2f\n" gen revenue net_trade gross_trade daily_rev
     end
     println("-"^80)
-    @printf "%-20s %12.2f\n" "Total Net Revenue" revenues_full[:total_revenue]
+    @printf "%-20s %12.2f %12s %12s %12.2f\n" "Total Net Revenue" revenues_full[:total_revenue] "" "" daily_metrics[:daily_total_revenue_full]
 
     println()
     println("GENERATOR COSTS (Production Costs)")
     println("-"^80)
+    @printf "%-20s %16s %16s\n" "Generator" "Total Cost (EUR)" "Cost/Day (EUR)"
+    println("-"^80)
     for (gen, cost) in sort(collect(costs[:generator_costs]))
-        @printf "%-20s: %12.2f EUR\n" gen cost
+        daily_cost = daily_metrics[:daily_gen_costs][gen]
+        @printf "%-20s %16.2f %16.2f\n" gen cost daily_cost
     end
     println("-"^80)
-    @printf "%-20s: %12.2f EUR\n" "Total System Cost" costs[:total_cost]
-    @printf "%-20s: %12.2f EUR/clearing\n" "Average per Clearing" (costs[:total_cost] / costs[:total_clearings])
+    @printf "%-20s %16.2f %16.2f\n" "Total System Cost" costs[:total_cost] daily_metrics[:daily_total_cost]
+    @printf "%-20s %16.2f %16.2f\n" "Average per Clearing" (costs[:total_cost] / costs[:total_clearings]) (daily_metrics[:daily_total_cost] / (costs[:total_clearings] / sim_days))
 
+    println()
+    println("SOCIAL WELFARE")
+    println("-"^80)
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Total Demand Value" welfare[:total_demand_value] daily_metrics[:daily_welfare][:demand_value]
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Total Generation Cost" welfare[:total_generation_cost] daily_metrics[:daily_welfare][:generation_cost]
+    println("-"^80)
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Social Welfare" welfare[:social_welfare] daily_metrics[:daily_welfare][:social_welfare]
+    
     println()
     println("GENERATOR PROFITS (Full Revenue - Cost)")
     println("-"^80)
+    @printf "%-20s %16s %16s\n" "Generator" "Total Profit (EUR)" "Profit/Day (EUR)"
+    println("-"^80)
     total_profit = 0.0
+    total_daily_profit = 0.0
     for gen in sort(collect(keys(revenues_full[:generator_revenues])))
         revenue = revenues_full[:generator_revenues][gen]
         cost = haskey(costs[:generator_costs], gen) ? costs[:generator_costs][gen] : 0.0
         profit = revenue - cost
+        daily_profit = profit / sim_days
         total_profit += profit
-        @printf "%-20s: %12.2f EUR\n" gen profit
+        total_daily_profit += daily_profit
+        @printf "%-20s %16.2f %16.2f\n" gen profit daily_profit
     end
     println("-"^80)
-    @printf "%-20s: %12.2f EUR\n" "Total Generator Profit" total_profit
+    @printf "%-20s %16.2f %16.2f\n" "Total Generator Profit" total_profit total_daily_profit
     
     println()
     println("STORAGE REVENUE")
     println("-"^80)
-    @printf "%-30s: %12.2f MWh\n" "Total Energy Discharged" storage[:total_discharge_energy]
-    @printf "%-30s: %12.2f MWh\n" "Total Energy Charged" storage[:total_charging_energy]
+    @printf "%-30s: %12.2f MWh   (%.2f MWh/day)\n" "Total Energy Discharged" storage[:total_discharge_energy] daily_metrics[:daily_storage][:discharge_energy]
+    @printf "%-30s: %12.2f MWh   (%.2f MWh/day)\n" "Total Energy Charged" storage[:total_charging_energy] daily_metrics[:daily_storage][:charging_energy]
     @printf "%-30s: %12.2f EUR/MWh\n" "Avg Discharge Price" storage[:avg_discharge_price]
     @printf "%-30s: %12.2f EUR/MWh\n" "Avg Charging Price" storage[:avg_charging_price]
     println("-"^80)
-    @printf "%-30s: %12.2f EUR\n" "Discharge Revenue" storage[:discharge_revenue]
-    @printf "%-30s: %12.2f EUR\n" "Charging Cost" storage[:charging_cost]
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Discharge Revenue" storage[:discharge_revenue] daily_metrics[:daily_storage][:discharge_revenue]
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Charging Cost" storage[:charging_cost] daily_metrics[:daily_storage][:charging_cost]
     println("-"^80)
-    @printf "%-30s: %12.2f EUR\n" "Net Storage Revenue" storage[:net_revenue]
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Net Storage Revenue" storage[:net_revenue] daily_metrics[:daily_storage][:net_revenue]
     @printf "%-30s: %12.2f EUR/clearing\n" "Average per Clearing" (storage[:net_revenue] / storage[:total_clearings])
     
     println()
     println("SYSTEM COSTS & PROFITS (Summary)")
     println("-"^80)
-    @printf "%-30s: %12.2f EUR\n" "Total System Cost" costs[:total_cost]
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Total System Cost" costs[:total_cost] daily_metrics[:daily_total_cost]
     total_profit_summary = 0.0
     for gen in sort(collect(keys(revenues_full[:generator_revenues])))
         revenue = revenues_full[:generator_revenues][gen]
         cost = haskey(costs[:generator_costs], gen) ? costs[:generator_costs][gen] : 0.0
         profit = revenue - cost
+        daily_profit = profit / sim_days
         total_profit_summary += profit
-        @printf "%-30s: %12.2f EUR\n" "$(gen) Profit" profit
+        @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "$(gen) Profit" profit daily_profit
     end
     println("-"^80)
-    @printf "%-30s: %12.2f EUR\n" "Total Generator Profit" total_profit_summary
+    @printf "%-30s: %12.2f EUR   (%.2f EUR/day)\n" "Total Generator Profit" total_profit_summary (total_profit_summary / sim_days)
 
     # Top delivery hours by absolute cashflow
     ledger, _, exec_price = compute_delivery_hour_ledger(all_results, cfg)

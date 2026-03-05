@@ -1,69 +1,81 @@
 # Rolling horizon parameters
 rolling_horizon:
-  simulation_days: 8             # total days to simulate 
+  simulation_days: 30             # total days to simulate (May 2025)
   look_ahead_window: 24           # hours to optimise ahead
-  reclear_frequency: 1            # reclear every N hours
+  reclear_frequency: 6            # reclear every N hours
   gate_closure: 1                 # hours locked from gate closure (no adjustment allowed)
   forecast_noise_std: 0.20        # standard deviation of wind forecast noise (0 = no noise)
+  use_timeseries: true            # use real data from CSV files instead of repeating profiles
 
 
 # Generator parameters
 dispatchableGenerators:
  Base:
   bidPrice: 30 # EUR/MWh
-  capacity: 1500 # MW
+  capacity: 6000 # MW
+  rampRate: 0.20 # fraction of capacity per hour (20% = 200 MW/h for 1000 MW unit)
+  startupTime: 4 # hours required after shutdown before producing again
 
  Mid:
-  bidPrice: 60 # EUR/MWh
-  capacity: 500 # MW
+  bidPrice: 80 # EUR/MWh
+  capacity: 3000 # MW
+  rampRate: 0.50 # fraction of capacity per hour (50% = 250 MW/h for 500 MW unit)
+  startupTime: 2 # hours required after shutdown before producing again
 
  Peak:
-  bidPrice: 100 # EUR/MWh
-  capacity: 500 # MW
+  bidPrice: 150 # EUR/MWh
+  capacity: 1500 # MW
+  rampRate: 1.0 # fraction of capacity per hour (100% = 500 MW/h for 500 MW unit)
+  startupTime: 1 # hours required after shutdown before producing again
 
 variableGenerators:
   Wind:
     bidPrice: 0         # EUR/MWh
-    capacity: 1000        # MW
-    # Low at night, strong in the afternoon/evening, length = 24
-    profile: [
-      0.20, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50, 0.60,
-      0.40, 0.35, 0.30, 0.30, 0.25, 0.25, 0.20, 0.20,
-      0.70, 0.80, 0.85, 0.80, 0.75, 0.70, 0.60, 0.50
-    ]
+    capacity: 4700      # MW - Actual installed offshore wind capacity in Netherlands
+    # Real data from Dutch system - May 2025 (720 hours)
+    # NOTE: CSV contains actual generation in MW (not availability factors)
+    # Max value in May 2025 data: ~4400 MW (93% capacity factor)
+    dataFile: "offwind_data_2025.csv"
+    dataColumn: "WindOffshore"
+    dateColumn: "StartDateTime"
+    startDate: "01/05/2025 00:00"
+    endDate: "30/05/2025 23:00"
   Solar:
     bidPrice: 0         # EUR/MWh
-    capacity: 300        # MW
+    capacity: 5000        # MW
     # Generation 7am-7pm, peak at 13h, symmetric, length = 24
     profile: [
       0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-      0.1, 0.3, 0.5, 0.6, 0.7, 0.8,
-      0.9, 0.8, 0.7, 0.6, 0.5, 0.3,
-      0.1, 0.0, 0.0, 0.0, 0.0, 0.0
+      0.1, 0.2, 0.35, 0.4, 0.5, 0.55,
+      0.6, 0.65, 0.45, 0.4, 0.4, 0.2,
+      0.05, 0.0, 0.0, 0.0, 0.0, 0.0
     ]
 
 # Storage parameters
 batteryStorage:
-  energyCapacity: 800 # MWh
-  powerCapacity: 400 # MW
+  energyCapacity: 6000 # MWh
+  powerCapacity: 2000 # MW
   efficiency: 0.9
   initialSOC: 0.2 # as fraction of energyCapacity
 
 
 # Demand parameters
 demand:
+  # Real data from Dutch system - May 2025 (720 hours)
+  dataFile: "demand_data_2025.csv"
+  dataColumn: "AverageLoad"
+  dateColumn: "StartDateTime"
+  startDate: "01/05/2025 00:00"
+  endDate: "30/05/2025 23:00"
+  
+  # Scalar adjustment to all demand values (MW)
+  adjustment: -2000  # MW
+  
   segments:
     Base:
       bidPrice: 300   # EUR/MWh (high willingness to pay)
-      quantity: [
-        1500, 1500, 1500, 1600, 1800, 1900,   # night time
-        2300, 2500, 2200, 2200, 2300, 2200,        # morning peak
-        2100, 2200, 2200, 2200,                         # mid and afternoon
-        2400, 2500, 2600, 2500, 2200, 2100, 1900, 1700   # evening peak and drop
-      ]
-
+      fraction: 0.90  # 90% of total load is base demand
+    
     Flex:
-      bidPrice: 50   # EUR/MWh (elastic, only if price low)
-      quantity: [200, 200, 200, 200, 200, 300, 400, 500,
-                 500, 500, 500, 500, 500, 500, 400, 300,
-                 300, 300, 300, 300, 300, 300, 300, 300]
+      bidPrice: 50   # EUR/MWh (elastic, only if price low)  
+      fraction: 0.10  # 10% of total load is flexible

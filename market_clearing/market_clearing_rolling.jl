@@ -57,12 +57,38 @@ all_results[:dispatch] = Dict{Int, Dict}()                  # dispatch[clearing]
 # Detailed clearing data for analysis
 all_results[:clearing_details] = Dict{Int, Dict}()
 
-# Set q_prev to 0 for first clearing
+# Initialise generator dispatch for ramping constraints
+# For the first clearing, use hour 0 dispatch from the full timeseries (prep hour)
+prev_g_dispatch = Dict{String, Float64}()
+disp_gen_names = Set{String}(String(gname) for (gname, _) in cfg["dispatchableGenerators"])
+for g in IG
+    # Hour 0 is prep hour - for dispatchable generators, start at 100% capacity (warm and available)
+    # For variable generators, use their hour 0 value
+    if g in disp_gen_names
+        prev_g_dispatch[g] = Q_gen_full[(g, 0)]  # Start at 100% capacity
+    else
+        prev_g_dispatch[g] = Q_gen_full[(g, 0)]  # Use hour 0 availability
+    end
+end
+
+# Set q_prev to match initial dispatch for first clearing
 # q_prev[g,h] = financial position = previous g_planned value
+# Initialize to starting dispatch so gate closure doesn't conflict with ramping
 prev_q_financial = Dict{Tuple{String,Int},Float64}()
 for g in IG
     for h in 1:look_ahead
-        prev_q_financial[(g, h)] = 0.0
+        prev_q_financial[(g, h)] = prev_g_dispatch[g]
+    end
+end
+
+# Initialize startup tracking for dispatchable generators
+# startup_remaining = hours until generator can produce (0 = ready, >0 = warming up)
+startup_remaining = Dict{String, Int}()
+for (gname, gdata) in cfg["dispatchableGenerators"]
+    g = String(gname)
+    if g in IG && haskey(gdata, "startupTime")
+        # Start with generators warm and ready (running at 100%)
+        startup_remaining[g] = 0
     end
 end
 
@@ -71,15 +97,18 @@ storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["
 
 
 # MAIN ROLLING HORIZON LOOP
+# Start from hour 1 (skip hour 0 which is prep hour with zero demand)
 
 clearing_count = 0
 
-for start_hour in 0:reclear_freq:(total_hours - look_ahead)
+for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     clearing_count += 1
     current_hour = start_hour                                             
     
-    # Print clearing header
-    print("Clearing $clearing_count (global hour $current_hour): ")
+    # Print clearing header (verbose for first 5, then every 50th)
+    if clearing_count <= 5 || clearing_count % 50 == 0
+        print("Clearing $clearing_count (global hour $current_hour): ")
+    end
     
     # Extract window time series
     Pr_gen_window, Q_gen_window, Pr_dem_window, Q_dem_window = get_window_timeseries(
@@ -87,9 +116,77 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
         current_hour, look_ahead, IG, ID
     )
     
+    # Apply startup time constraints
+    # When a generator shuts down and later wants to restart, it needs startup_time hours
+    disp_gen = cfg["dispatchableGenerators"]
+    for (gname, gdata) in disp_gen
+        g = String(gname)
+        if g in IG && haskey(gdata, "startupTime")
+            startup_time = Int(gdata["startupTime"])
+            was_running = prev_g_dispatch[g] >= 1e-6
+            
+            # Update startup timer based on previous state
+            if was_running
+                # Generator was running at end of last period → warm and ready
+                startup_remaining[g] = 0
+            elseif get(startup_remaining, g, 0) > 0
+                # Generator in startup process → decrement timer
+                startup_remaining[g] = max(0, startup_remaining[g] - reclear_freq)
+            else
+                # Generator was off at end of last period and not already in startup
+                # Need to find when it shut down to calculate how long it's been off
+                hours_off = reclear_freq  # Default: assume off for entire executed period
+                
+                if clearing_count > 1 && haskey(all_results[:clearing_details], clearing_count - 1)
+                    prev_clearing = all_results[:clearing_details][clearing_count - 1]
+                    prev_g_planned = prev_clearing[:g_planned]
+                    
+                    # Scan backwards through executed hours to find LAST hour it was running
+                    for h in reclear_freq:-1:1
+                        if prev_g_planned[g, h] >= 1e-6
+                            # Found last hour it was ON
+                            hours_off = reclear_freq - h
+                            break
+                        end
+                    end
+                    # If never found (always off), hours_off = reclear_freq (correct default)
+                end
+                
+                # Start countdown, accounting for hours already spent off
+                startup_remaining[g] = max(0, startup_time - hours_off)
+            end
+            
+            # If still in startup period, force capacity to zero only for hours still warming up
+            if startup_remaining[g] > 0
+                if clearing_count <= 5 || clearing_count % 50 == 0
+                    println("  [$g starting up: $(startup_remaining[g]) hours remaining]")
+                end
+                # Force capacity to zero only for hours where generator is still warming up
+                # After warmup completes, generator becomes available within the look-ahead window
+                for h in 1:min(startup_remaining[g], look_ahead)
+                    Q_gen_window[(g, h)] = 0.0
+                end
+            end
+        end
+    end
+    
     # Add forecast noise to wind (applies to all hours, with decay making h=1 converge to real wind)
     if forecast_noise > 0.0
         add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, look_ahead)
+    end
+    
+    # Override executed hours (1 to reclear_freq) with REALIZED renewable values
+    # At delivery, there's no uncertainty - we dispatch based on actual wind/solar availability
+    # This ensures all clearing frequencies dispatch identical total renewable energy
+    var_gen_names = Set{String}(String(gname) for (gname, _) in cfg["variableGenerators"])
+    for g in IG
+        if g in var_gen_names
+            for h in 1:reclear_freq
+                global_hour = current_hour + (h - 1)
+                # Use the true value from the full timeseries (no noise)
+                Q_gen_window[(g, h)] = Q_gen_full[(g, global_hour)]
+            end
+        end
     end
     
     # Create new model for this window
@@ -121,14 +218,29 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     m.ext[:parameters][:storage_initial_soc] = storage_soc_carryover
     
     # Pass gate closure parameter
-    m.ext[:parameters][:gate_closure] = gate_closure
+    # For the first clearing, disable gate closure to allow all generators to find initial equilibrium
+    # (there's no previous market clearing to enforce gate closure against)
+    effective_gate_closure = (clearing_count == 1) ? 0 : gate_closure
+    m.ext[:parameters][:gate_closure] = effective_gate_closure
     
-
+    # Pass list of generators exempt from gate closure (Peak, Wind, and any in startup)
+    flexible_generators = Set{String}(["Peak", "Wind"])
+    for (gname, remaining) in startup_remaining
+        if remaining > 0
+            push!(flexible_generators, String(gname))
+        end
+    end
+    m.ext[:parameters][:flexible_generators] = flexible_generators
+    
+    # Pass generator initial dispatch for ramping constraints
+    m.ext[:parameters][:generator_initial_dispatch] = prev_g_dispatch
+    
     # Build and solve
     build_market_clearing!(m)
     optimize!(m)
     
     status = termination_status(m)
+    
     @assert status == OPTIMAL "Optimization failed with status: $status"
     
     # Extract results
@@ -168,6 +280,12 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
     # g_planned[g,h] from this clearing becomes q_prev[g,h] in next clearing
     prev_q_financial = extract_window_commitments(g_planned_val, IG, look_ahead)
 
+    # Extract dispatch at the end of executed hours for ramping constraint continuity
+    # The dispatch at hour reclear_freq becomes the initial dispatch for next clearing's hour 1
+    for g in IG
+        prev_g_dispatch[g] = g_planned_val[g, reclear_freq]
+    end
+
     
     # Storage state continuity: pass executed hours SOC to next clearing
     # After reclear_freq hours, we need SOC at the end of those executed hours
@@ -191,10 +309,12 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
 
     soc_end = round(SOC_val[h]; digits=1)
 
-    println("Price h=1: $λ_h1 €/MWh | SOC_end: $soc_end MWh | Ch=$(round(Qch_val[h]; digits=1)) | Dis=$(round(Qdis_val[h]; digits=1))")
+    if clearing_count <= 5 || clearing_count % 50 == 0
+        println("Clearing $clearing_count (global hour $current_hour): Price h=1: $λ_h1 €/MWh | SOC_end: $soc_end MWh | Ch=$(round(Qch_val[h]; digits=1)) | Dis=$(round(Qdis_val[h]; digits=1))")
+    end
 
-    # Detailed diagnostics for first 3 clearings
-    if clearing_count <= 3
+    # Detailed diagnostics for first 5 clearings
+    if clearing_count <= 5
         price_setters = String[]
 
         # 1) Flex marginal?
@@ -205,7 +325,7 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
         end
 
         # 2) Any generator marginal?
-        for g in ["Wind", "Base", "Peak"]
+        for g in ["Wind", "Solar", "Base", "Mid", "Peak"]
             if g in IG
                 cap = m.ext[:timeseries][:Q_gen][(g, h)]
                 disp = g_planned_val[g, h]
@@ -233,7 +353,7 @@ for start_hour in 0:reclear_freq:(total_hours - look_ahead)
         end
 
         # Print key positions
-        for g in ["Wind", "Base", "Peak"]
+        for g in ["Wind", "Solar", "Base", "Mid", "Peak"]
             if g in IG
                 cap = m.ext[:timeseries][:Q_gen][(g, h)]
                 qh  = round(q_val[g, h]; digits=1)
