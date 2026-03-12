@@ -66,21 +66,6 @@ function ClearRolling(data, with_ramps)
 	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
 	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
 	    
-	    # println("SOC: ", previous_time_period_data)
-
-
-
-	    # next up, plot some things
-	    # could this be configurable based on yaml input?
-	    
-	    
-	    # these display themselves, should they??
-	    
-	    for iter in m.ext[:sets][:CH]
-	        # PlotHourlyMarketEquilibrium.plot(m,iter)
-	    end
-	    
-	    
 	end
 
 	# println(resultset)
@@ -103,13 +88,77 @@ function ClearRolling(data, with_ramps)
 	    PlotGenerationStack.plot(m)
 	=#
 end
+
+# TODO: tests around these functions, they are important.
+
+
+function marketMatch(t, market, timePeriodsPerDay)
+	# determine if a market should operate in this moment based on time of day
+	if ((t - market[:clockTimeBegin]) % market[:clearingInterval] == 0) # if the offset between this period and the time we begin is zero, or a multiple of the interval, this period should hold a market
+		
+		println(t, market)
+		return true
+	end
+	return false
+end
+
+# use configuration (data) and the time period in question (1 to end of window in which to consider clearing) to determine if a market should be cleared in this time period, returning a set of any markets that match
+
+function generateMarketSetForTimePeriod(t, data)
+	markets = []
+
+	for market in data[:marketSequence]
+		if marketMatch(t, market, data[:timePeriodsPerDay])
+			push!(markets, market)
+		end
+	end
+
+	return markets
+end
+
+
+function ClearFixedHorizonStatusQuo(data)
+	# TODO: revisit clearing window idea
+	time_period_range = range(1,data[:clearForDays]*data[:timePeriodsPerDay] - data[:clearingWindow]) # go from time_period 1 to the last window for which we have a full data set
+    previous_time_period_data = Dict(
+    	:SOC => data[:batteryStorage]["initialSOC"]*data[:batteryStorage]["energyCapacity"],
+    	:Q_gen => Dict{String,Float64}( (g, float(gConfig["initialQuantity"])) for (g, gConfig) in data[:dispatchableGenerators])
+    )
+
+    # generate the sequence of markets - one entry for each t, empty if no markets to be run at that time, otherwise, a list of markets to clear at that time
+    marketSequence = []
+    for t in time_period_range
+    	push!(marketSequence,generateMarketSetForTimePeriod(t,data))
+    end
+
+    println(marketSequence)
+
+#=
+    resultset = ProcessData.CreateResultSet()
+    for t in time_period_range
+		m = with_ramps ? RollingModelWithRampRates.build_for_time_period(data,t,previous_time_period_data) : RollingModel.build_for_time_period(data,t,previous_time_period_data) 
+	    optimize!(m)
+	    # println("Termination status: ", termination_status(m))
+	    # println("Objective value: ", objective_value(m))
+
+	    ProcessData.AddToResultSet!(resultset, m, t)
+
+	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
+	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
+	    
+	end
+=#
+end
 	
 function Clear(data)
 	if data[:strategy] == "rolling"
 		ClearRolling(data, false)
 	elseif data[:strategy] == "rolling_with_ramps"
 		ClearRolling(data, true)
+	elseif data[:strategy] == "fixed_horizon_status_quo"
+		ClearFixedHorizonStatusQuo(data)
 	else
+		print("strategy not recognized, using basic clearing: ", data[:strategy])
 		ClearBasic(data)
 	end
 end

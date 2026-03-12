@@ -29,6 +29,19 @@ function load_input_data(path::String)
         data[:noiseLevel] = float(cfg["noiseLevel"])
     end
 
+    if data[:strategy] == "fixed_horizon_status_quo"
+        data[:marketSequence] = []
+        for (name, market) in get(cfg,"marketSequence",Dict())
+            addMarket = Dict{Symbol,Any}()
+            addMarket[:name] = name
+            addMarket[:clearingInterval] = get(market,"clearingInterval", Int) # number of time periods between market clearing/optimization rounds
+            addMarket[:clearingWindow] = get(market,"clearingWindow", Int) # number of time periods to consider in each round
+            addMarket[:lookAheadDistance] = get(market,"lookAheadDistance", Int) # window under consideration starts lookAheadDistance time periods ahead
+            addMarket[:clockTimeBegin] = get(market,"clockTimeBegin", Int) # expressed in market clearing periods - how long from the beginning of the day should this sequence begin?
+            push!(data[:marketSequence], addMarket)
+        end
+    end
+
     # generators: separate blocks for dispatchable and variable generators
     data[:dispatchableGenerators] = cfg["dispatchableGenerators"]
     data[:variableGenerators]     = get(cfg, "variableGenerators", Dict())
