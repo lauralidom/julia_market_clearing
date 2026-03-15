@@ -1,5 +1,6 @@
 # ANALYZE COSTS AND REVENUE FROM SIMULATION
-# Run this after market_clearing_rolling.jl to see economic summary and save to Excel
+# Run this after market_clearing_rolling.jl OR market_clearing_fixed.jl
+# Works with all clearing modes (rolling horizon, fixed rolling, simple 24h)
 
 using YAML
 using Printf
@@ -8,7 +9,7 @@ include("src/costs.jl")
 
 # Check if all_results exists in workspace
 if !@isdefined(all_results)
-    error("all_results not found. Please run market_clearing_rolling.jl first.")
+    error("all_results not found. Please run a market clearing simulation first.")
 end
 
 if !@isdefined(cfg)

@@ -1,0 +1,33 @@
+Implement a bilevel market clearing model with the following structure:
+
+LAYER 1 - CLEARING PHASE (Ex-Ante Market):
+- Markets clear using wind FORECASTS with noise (no perfect foresight override)
+- Produces: q (adjustments), g_planned (positions), λ (prices), Qch/Qdis/SOC schedules
+- All generators bid based on forecasted wind
+- Gate closure locks Base/Mid/Solar; Peak and Wind remain flexible
+- This is the financial/market layer
+
+LAYER 2 - DELIVERY PHASE (Ex-Post Physical Reality):
+- Wind REALIZES differently from forecast (use Q_gen_full with no noise)
+- Peak plant re-optimizes jointly with Battery to balance forecast errors
+- Solve second optimization with:
+  * Fixed: Wind = realized, Base/Mid/Solar = committed (g_planned)
+  * Optimize: Peak + Battery (Qch, Qdis, SOC)
+  * Objective: Minimize peak generation cost + battery cycling costs
+  * Constraints: Energy balance, SOC dynamics, power/energy limits
+- Produces: g_actual (physical dispatch), SOC_actual (physical battery state)
+
+STATE CONTINUITY:
+- Financial: g_planned (future hours) → next Q_prev
+- Physical battery: SOC_actual[reclear_freq] → next SOC_init
+- Physical generation: g_actual[reclear_freq] → g_last_executed (for ramping)
+
+COST TRACKING:
+- Market settlement: g_planned × clearing_prices (financial layer)
+- Physical production: g_actual × marginal_costs (physical layer)  
+- Imbalance: Difference shows cost of forecast errors
+
+Key files to modify:
+- market_clearing_rolling.jl: Add delivery phase optimization after line 193
+- model_setup.jl: May need helper function for delivery optimization
+- costs.jl: Add separate tracking for g_planned vs g_actual costs                       

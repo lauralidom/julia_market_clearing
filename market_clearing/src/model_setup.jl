@@ -29,9 +29,59 @@ function load_input_data(path::String)
     return data
 end
 
+# 0.1: Derive simulation date range from a single month input in YAML.
+# Updates rolling_horizon.simulation_days and all CSV-backed start/end dates.
+function apply_simulation_month!(cfg::Dict)
+    rh = get(cfg, "rolling_horizon", nothing)
+    if rh === nothing
+        return cfg
+    end
+
+    sim_month = Int(get(rh, "simulation_month", 1))
+    if sim_month < 1 || sim_month > 12
+        error("rolling_horizon.simulation_month must be between 1 and 12")
+    end
+
+    # Dataset is fixed to 2025, so only month is configurable.
+    month_start = Date(2025, sim_month, 1)
+    month_end = lastdayofmonth(month_start)
+    start_dt = DateTime(month_start)
+    end_dt = DateTime(month_end) + Hour(23)
+
+    # Keep simulation_days consistent with selected month.
+    rh["simulation_days"] = day(month_end)
+
+    iso_fmt = dateformat"yyyy-mm-dd HH:MM:SS"
+    euro_fmt = dateformat"dd/mm/yyyy HH:MM"
+    start_iso = Dates.format(start_dt, iso_fmt)
+    end_iso = Dates.format(end_dt, iso_fmt)
+    start_euro = Dates.format(start_dt, euro_fmt)
+    end_euro = Dates.format(end_dt, euro_fmt)
+
+    # Variable generators (wind/solar): ISO datetime format.
+    if haskey(cfg, "variableGenerators")
+        for (_, gdata_any) in cfg["variableGenerators"]
+            if haskey(gdata_any, "dataFile")
+                gdata_any["startDate"] = start_iso
+                gdata_any["endDate"] = end_iso
+            end
+        end
+    end
+
+    # Demand: European datetime format.
+    if haskey(cfg, "demand") && haskey(cfg["demand"], "dataFile")
+        cfg["demand"]["startDate"] = start_euro
+        cfg["demand"]["endDate"] = end_euro
+    end
+
+    return cfg
+end
+
 # 0.5: Helper function to load CSV data with date filtering
 function load_csv_timeseries(filepath::String, column::String, date_column::String, 
-                              start_date::String, end_date::String, expected_hours::Int)
+                              start_date::String, end_date::String, expected_hours::Int,
+                              config_format::DateFormat, csv_format::DateFormat;
+                              conversion_factor::Float64=1.0)
     # Read CSV file (has header row), silencing warnings about bad values at end of file
     df = CSV.read(filepath, DataFrame, 
                   stringtype=String,
@@ -49,19 +99,41 @@ function load_csv_timeseries(filepath::String, column::String, date_column::Stri
     # Remove rows with missing data values (from parsing errors like #DIV/0!)
     df = dropmissing(df, Symbol(column))
     
-    # Parse dates for filtering, skipping invalid dates
-    date_format = dateformat"dd/mm/yyyy HH:MM"
-    start_dt = DateTime(start_date, date_format)
-    end_dt = DateTime(end_date, date_format)
+    # Parse date range for filtering
+    start_dt = DateTime(start_date, config_format)
+    end_dt = DateTime(end_date, config_format)
+
+    # Parse CSV timestamps robustly across known dataset formats.
+    parse_csv_datetime(date_str::String) = begin
+        local dt
+        try
+            dt = DateTime(date_str, csv_format)
+            return dt
+        catch
+        end
+        try
+            dt = DateTime(date_str, dateformat"yyyy-mm-dd HH:MM:SS")
+            return dt
+        catch
+        end
+        try
+            dt = DateTime(date_str, dateformat"yyyy-mm-dd HH:MM")
+            return dt
+        catch
+        end
+        try
+            dt = DateTime(date_str, dateformat"dd/mm/yyyy HH:MM")
+            return dt
+        catch
+            return missing
+        end
+    end
     
-    # Parse date column, handling invalid dates
+    # Parse date column
     parsed_dates = Vector{Union{DateTime, Missing}}(undef, nrow(df))
     for i in 1:nrow(df)
-        try
-            parsed_dates[i] = DateTime(df[i, Symbol(date_column)], date_format)
-        catch
-            parsed_dates[i] = missing  # Invalid dates become missing
-        end
+        date_str = string(df[i, Symbol(date_column)])
+        parsed_dates[i] = parse_csv_datetime(date_str)
     end
     df[!, :parsed_date] = parsed_dates
     
@@ -71,15 +143,16 @@ function load_csv_timeseries(filepath::String, column::String, date_column::Stri
     # Filter by date range
     filtered_df = filter(row -> row.parsed_date >= start_dt && row.parsed_date <= end_dt, df)
     
-    # Extract values
-    values = filtered_df[!, Symbol(column)]
+    # Extract values and apply conversion factor (e.g., kW to MW: divide by 1000)
+    values = filtered_df[!, Symbol(column)] .* conversion_factor
     
     # Validate it's right amount
     if length(values) != expected_hours
         error("Filtered CSV has $(length(values)) rows for date range $start_date to $end_date, but $expected_hours hours are needed")
     end
     
-    println("  → Loaded $(length(values)) hourly values from $start_date to $end_date")
+    conversion_note = conversion_factor != 1.0 ? " (converted by factor $conversion_factor)" : ""
+    println("  → Loaded $(length(values)) hourly values from $start_date to $end_date$conversion_note")
     
     return values
 end
@@ -152,17 +225,42 @@ function load_and_expand_timeseries(cfg::Dict, total_hours::Int)
         P = float(gdata_any["bidPrice"])
         Q = float(gdata_any["capacity"])
         
-        # Check if we should load from CSV file
+        # Check if we should load from CSV file(s)
         if haskey(gdata_any, "dataFile") && haskey(gdata_any, "dataColumn")
             # Load data from CSV
-            filepath = gdata_any["dataFile"]
-            column = gdata_any["dataColumn"]
+            # Wind/Solar use ISO format: yyyy-mm-dd HH:MM:SS
             date_column = get(gdata_any, "dateColumn", "StartDateTime")
-            start_date = get(gdata_any, "startDate", "01/01/2025 00:00")
-            end_date = get(gdata_any, "endDate", "31/12/2025 23:00")
+            start_date = get(gdata_any, "startDate", "2025-01-01 00:00:00")
+            end_date_config = get(gdata_any, "endDate", "2025-12-31 23:00:00")
+            conversion_factor = get(gdata_any, "conversionFactor", 1.0)
             
-            println("Loading $g data from CSV: $filepath (column: $column)")
-            timeseries_values = load_csv_timeseries(filepath, column, date_column, start_date, end_date, total_hours - 1)
+            # Calculate actual end date based on simulation length
+            iso_format = dateformat"yyyy-mm-dd HH:MM:SS"
+            start_dt = DateTime(start_date, iso_format)
+            actual_end_dt = start_dt + Hour(total_hours - 2)
+            end_date = Dates.format(actual_end_dt, iso_format)
+            
+            # Support multiple files (for combining wind sources)
+            datafiles = gdata_any["dataFile"]
+            if isa(datafiles, String)
+                datafiles = [datafiles]  # Convert single file to array
+            end
+            
+            column = gdata_any["dataColumn"]
+            
+            # Load and sum all files
+            timeseries_values = zeros(Float64, total_hours - 1)
+            for filepath in datafiles
+                println("Loading $g data from CSV: $filepath (column: $column)")
+                println("  Date range: $start_date to $end_date ($(total_hours - 1) hours)")
+                file_values = load_csv_timeseries(filepath, column, date_column, start_date, end_date, total_hours - 1,
+                                                   iso_format, iso_format, conversion_factor=conversion_factor)
+                timeseries_values .+= file_values
+            end
+            
+            if length(datafiles) > 1
+                println("  ✓ Combined $(length(datafiles)) files for $g")
+            end
             
             # Hour 0: prep hour, use first value
             Pr_gen_full[(g, 0)] = P
@@ -199,21 +297,24 @@ function load_and_expand_timeseries(cfg::Dict, total_hours::Int)
     # Check if demand has CSV file
     if haskey(dem_config, "dataFile") && haskey(dem_config, "dataColumn")
         # Load total demand from CSV
+        # Demand uses European format: dd/mm/yyyy HH:MM
         filepath = dem_config["dataFile"]
         column = dem_config["dataColumn"]
         date_column = get(dem_config, "dateColumn", "StartDateTime")
         start_date = get(dem_config, "startDate", "01/01/2025 00:00")
-        end_date = get(dem_config, "endDate", "31/12/2025 23:00")
+        end_date_config = get(dem_config, "endDate", "31/12/2025 23:00")
+        conversion_factor = get(dem_config, "conversionFactor", 1.0)
+        
+        # Calculate actual end date based on simulation length
+        euro_format = dateformat"dd/mm/yyyy HH:MM"
+        start_dt = DateTime(start_date, euro_format)
+        actual_end_dt = start_dt + Hour(total_hours - 2)
+        end_date = Dates.format(actual_end_dt, euro_format)
         
         println("Loading demand data from CSV: $filepath (column: $column)")
-        total_demand = load_csv_timeseries(filepath, column, date_column, start_date, end_date, total_hours - 1)
-        
-        # Apply scalar adjustment if specified (e.g., to reduce demand and increase renewable penetration)
-        adjustment = float(get(dem_config, "adjustment", 0.0))
-        if adjustment != 0.0
-            println("  Applying demand adjustment: $(adjustment) MW to all hours")
-            total_demand = total_demand .+ adjustment
-        end
+        println("  Date range: $start_date to $end_date ($(total_hours - 1) hours)")
+        total_demand = load_csv_timeseries(filepath, column, date_column, start_date, end_date, total_hours - 1,
+                                            euro_format, euro_format, conversion_factor=conversion_factor)
         
         # Split demand into segments based on fractions
         for (dname, ddata_any) in dem
@@ -347,12 +448,15 @@ function prepare_Q_prev_for_next_window(prev_q_financial::Dict, window_length::I
     
     for g in IG
         for h in 1:window_length
-            if h <= window_length - reclear_freq
-                # Hours 1 to (window_length - reclear_freq): shift forward from previous window
+            # Check if we can access the shifted position from previous window
+            prev_hour = h + reclear_freq
+            if haskey(prev_q_financial, (g, prev_hour))
+                # This hour was seen in previous clearing - shift forward
                 # Previous hour (h + reclear_freq) becomes current hour h's financial baseline
-                Q_prev[(g, h)] = prev_q_financial[(g, h + reclear_freq)]
+                Q_prev[(g, h)] = prev_q_financial[(g, prev_hour)]
             else
-                # Last reclear_freq hours (new hours entering): no prior commitment
+                # This is a new hour entering the horizon (only in rolling mode)
+                # In rolling_fixed, all hours should have previous commitments
                 Q_prev[(g, h)] = 0.0
             end
         end

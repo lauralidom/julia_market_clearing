@@ -2,23 +2,63 @@
 
 using Plots, Statistics, Printf, XLSX
 
-function plot_rolling_horizon_results(all_results::Dict)
-    # Global parameters for all visualizations
-    start_clearing = 89  # Can be changed from 1 to 160
-    num_clearings_to_show = 5
+# Shared visualization inputs (used by rolling and fixed simulation scripts)
+# VIS_DAY_OF_MONTH accepts either an integer day (1 = first day) or :last.
+const VIS_DAY_OF_MONTH = 17
+const VIS_START_CLEARING_OF_DAY = 1
+const VIS_NUM_CLEARINGS_TO_SHOW = 5
+
+function get_clearings_for_day(clearing_details::Dict, day_of_month::Int)
+    day_start_hour = (day_of_month - 1) * 24 + 1
+    day_end_hour = day_of_month * 24
+
+    all_clearing_indices = sort(collect(keys(clearing_details)))
+    return [c for c in all_clearing_indices if day_start_hour <= clearing_details[c][:current_hour] <= day_end_hour]
+end
+
+function plot_rolling_horizon_results(all_results::Dict;
+                                      day_of_month=VIS_DAY_OF_MONTH,
+                                      start_clearing_of_day::Int=VIS_START_CLEARING_OF_DAY,
+                                      num_clearings_to_show::Int=VIS_NUM_CLEARINGS_TO_SHOW)
     
     clearing_details = all_results[:clearing_details]
     dispatch_dict = all_results[:dispatch]
+
+    if isempty(clearing_details)
+        error("No clearing details found in all_results.")
+    end
+
+    max_current_hour = maximum(clearing_details[c][:current_hour] for c in keys(clearing_details))
+    max_day_available = Int(ceil(max_current_hour / 24))
+    selected_day = day_of_month == :last ? max_day_available : Int(day_of_month)
+
+    if selected_day < 1 || selected_day > max_day_available
+        error("Invalid day_of_month=$day_of_month. Available range is 1:$max_day_available.")
+    end
+
+    day_clearings = get_clearings_for_day(clearing_details, selected_day)
+    if isempty(day_clearings)
+        error("No clearings found for day $selected_day.")
+    end
+
+    if start_clearing_of_day < 1 || start_clearing_of_day > length(day_clearings)
+        error("Invalid start_clearing_of_day=$start_clearing_of_day for day $selected_day. Available range is 1:$(length(day_clearings)).")
+    end
+
+    last_idx_in_day = min(length(day_clearings), start_clearing_of_day + num_clearings_to_show - 1)
+    clearing_indices = day_clearings[start_clearing_of_day:last_idx_in_day]
+    num_selected_clearings = length(clearing_indices)
+    start_clearing = clearing_indices[1]
     
     # Calculate global hour range for consistent x-axis across all plots
-    clearing_indices = start_clearing:(start_clearing + num_clearings_to_show - 1)
     start_global_hour = clearing_details[start_clearing][:current_hour]
-    last_clearing_start = clearing_details[clearing_indices[end]][:current_hour]
-    end_global_hour = last_clearing_start + 23
+    last_clearing = clearing_indices[end]
+    last_clearing_start = clearing_details[last_clearing][:current_hour]
+    end_global_hour = last_clearing_start + clearing_details[last_clearing][:look_ahead] - 1
     
     # Plot 1: Prices for the selected clearings
     p1 = plot(xlabel="Global Hour", ylabel="Price (EUR/MWh)",
-              title="Prices - Clearings $start_clearing-$(start_clearing+num_clearings_to_show-1)",
+              title="Prices - Day $selected_day, clearings $(start_clearing_of_day)-$(start_clearing_of_day+num_selected_clearings-1)",
               legend=:topright, linewidth=2.5, size=(1000, 400))
     
     # Define line styles and markers to distinguish overlapping lines
@@ -39,8 +79,8 @@ function plot_rolling_horizon_results(all_results::Dict)
             plot!(p1, global_hours, prices, 
                   label="Clearing $clearing_num", 
                   linewidth=2.5,
-                  linestyle=line_styles[idx],
-                  marker=markers[idx],
+                                    linestyle=line_styles[mod1(idx, length(line_styles))],
+                                    marker=markers[mod1(idx, length(markers))],
                   markersize=4,
                   markerstrokewidth=0,
                   alpha=0.85)
@@ -58,20 +98,22 @@ function plot_rolling_horizon_results(all_results::Dict)
     subplots = []
     
     for gen_name in generators
+        ytick_labels = vcat(["q_prev"], ["C$c" for c in clearing_indices])
+
         # Create subplot for this generator
         p_gen = plot(title="$gen_name", xlabel="Global Hour", ylabel="Clearing",
                     legend=false, size=(1000, 400),
-                    yticks=(0:num_clearings_to_show, ["q_prev", "C$start_clearing", "C$(start_clearing+1)", 
-                                                       "C$(start_clearing+2)", "C$(start_clearing+3)", "C$(start_clearing+4)"]),
+                    yticks=(0:num_selected_clearings, ytick_labels),
                     yflip=true, tickfontsize=7, guidefontsize=9, titlefontsize=11)
         
         # First row: q_prev (previous position before the starting clearing)
         if haskey(clearing_details, start_clearing)
             Q_prev_dict = clearing_details[start_clearing][:Q_prev]
             clearing_start_hour = clearing_details[start_clearing][:current_hour]
+            look_ahead_hours = clearing_details[start_clearing][:look_ahead]
             
             # Plot q_prev as bars using global hours
-            for local_h in 1:24
+            for local_h in 1:look_ahead_hours
                 global_h = clearing_start_hour + local_h - 1
                 value = Q_prev_dict[(gen_name, local_h)]
                 
@@ -92,9 +134,10 @@ function plot_rolling_horizon_results(all_results::Dict)
             if haskey(clearing_details, clearing_num)
                 q_dict = clearing_details[clearing_num][:q]
                 clearing_start_hour = clearing_details[clearing_num][:current_hour]
+                look_ahead_hours = clearing_details[clearing_num][:look_ahead]
                 
                 # Plot q adjustments as bars using global hours
-                for local_h in 1:24
+                for local_h in 1:look_ahead_hours
                     global_h = clearing_start_hour + local_h - 1
                     value = q_dict[gen_name, local_h]
                     
@@ -113,15 +156,14 @@ function plot_rolling_horizon_results(all_results::Dict)
         
         # Set consistent x-axis limits across all generator plots
         xlims!(p_gen, start_global_hour - 0.5, end_global_hour + 0.5)
-        ylims!(p_gen, -0.5, num_clearings_to_show + 0.5)
+        ylims!(p_gen, -0.5, num_selected_clearings + 0.5)
         
         push!(subplots, p_gen)
     end
     
     # Plot 2: Generation Mix for 3 clearings (side by side stacked area plots)
     # Select 3 clearings to display
-    clearings_for_mix = [start_clearing, start_clearing + 1, start_clearing + 2]
-    clearings_for_mix = filter(c -> c <= length(clearing_details), clearings_for_mix)
+    clearings_for_mix = clearing_indices[1:min(3, length(clearing_indices))]
     
     # Generator order for stacking (bottom to top)
     gen_order = ["Base", "Mid", "Solar", "Wind", "Peak"]
@@ -138,28 +180,31 @@ function plot_rolling_horizon_results(all_results::Dict)
             
             # Get the clearing start hour for title
             clearing_start_hour = details[:current_hour]
-            hours = 1:24
+            look_ahead_hours = details[:look_ahead]
+            hours = 1:look_ahead_hours
             global_hours = clearing_start_hour .+ (hours .- 1)
             
             # Get storage discharge data
-            discharge_data = length(details[:discharging]) >= 24 ? details[:discharging][1:24] : details[:discharging]
-            charging_data = length(details[:charging]) >= 24 ? details[:charging][1:24] : details[:charging]
+            discharge_data = details[:discharging][1:look_ahead_hours]
+            charging_data = details[:charging][1:look_ahead_hours]
             
             # Get demand data
-            demand_base = length(details[:demand_base]) >= 24 ? details[:demand_base][1:24] : details[:demand_base]
-            demand_flex = length(details[:demand_flex]) >= 24 ? details[:demand_flex][1:24] : details[:demand_flex]
-            total_demand = demand_base .+ demand_flex .+ charging_data
+            demand_base = details[:demand_base][1:look_ahead_hours]
+            demand_flex = details[:demand_flex][1:look_ahead_hours]
+            total_demand = demand_base .+ demand_flex
+            total_demand_with_charging = total_demand .+ charging_data
             
             # Create stacked area plot
             p_mix = plot(xlabel="Local Hour", ylabel="MW",
                         title="Clearing $clearing_num (Global Hours $(global_hours[1])-$(global_hours[end]))",
-                        legend=:bottomright, size=(320, 400), 
-                        tickfontsize=7, guidefontsize=9, titlefontsize=10)
+                        legend=:topright, size=(320, 400), 
+                        tickfontsize=7, guidefontsize=9, titlefontsize=10, legendfontsize=6,
+                        yformatter=y -> y >= 1000 ? string(Int(round(y/1000))) * "k" : string(Int(round(y))))
             
             # Stack generators manually using fillrange
-            cumsum_prev = zeros(24)
+            cumsum_prev = zeros(look_ahead_hours)
             for gen in available_gens
-                gen_values = length(gen_data[gen]) >= 24 ? gen_data[gen][1:24] : gen_data[gen]
+                gen_values = gen_data[gen][1:look_ahead_hours]
                 cumsum_curr = cumsum_prev .+ gen_values
                 
                 # Create filled area for this generator
@@ -179,12 +224,18 @@ function plot_rolling_horizon_results(all_results::Dict)
                 cumsum_prev = cumsum_discharge
             end
             
-            # Add demand + charging as a line on top
-            plot!(p_mix, hours, total_demand,
-                  label="Demand+Charging", color=:black, linewidth=2, linestyle=:solid)
+            # Show charging as a line to avoid visual confusion with stacked areas.
+            if maximum(charging_data) > 0.1
+                plot!(p_mix, hours, total_demand_with_charging,
+                      label="Charging", color=:mediumpurple, linewidth=2, linestyle=:solid)
+            end
             
-            xlims!(p_mix, 0.5, 24.5)
-            ylims!(p_mix, 0, maximum([maximum(cumsum_prev), maximum(total_demand)]) * 1.1)
+            # Actual demand line (no charging included)
+            plot!(p_mix, hours, total_demand,
+                  label="Demand", color=:black, linewidth=2, linestyle=:solid)
+            
+            xlims!(p_mix, 0.5, look_ahead_hours + 0.5)
+            ylims!(p_mix, 0, maximum([maximum(cumsum_prev), maximum(total_demand_with_charging)]) * 1.1)
             
             push!(mix_plots, p_mix)
         end
@@ -194,7 +245,7 @@ function plot_rolling_horizon_results(all_results::Dict)
     if length(subplots) == 2 && length(mix_plots) > 0
         # Create horizontal layout for generation mix plots
         p_mix_combined = plot(mix_plots..., layout=(1, length(mix_plots)), size=(1000, 400))
-        plot(p1, subplots[1], subplots[2], p_mix_combined, layout=(4,1), size=(1000, 1600))
+        plot(p1, p_mix_combined, subplots[1], subplots[2], layout=(4,1), size=(1000, 1600))
     elseif length(subplots) == 2
         plot(p1, subplots[1], subplots[2], layout=(3,1), size=(1000, 1200))
     elseif length(subplots) == 1
@@ -202,4 +253,110 @@ function plot_rolling_horizon_results(all_results::Dict)
     else
         plot(p1, layout=(1,1), size=(1000, 400))
     end
+end
+
+function plot_simple_24h_results(all_results::Dict)
+    """Simple visualization for single 24h optimization (no reclearing)"""
+    
+    clearing_details = all_results[:clearing_details][1]  # Only one clearing
+    dispatch_dict = all_results[:dispatch][1]
+    
+    # Plot 1: Prices over 24 hours
+    prices = clearing_details[:prices]
+    hours = 1:length(prices)
+    
+    p1 = plot(hours, prices,
+              xlabel="Hour", ylabel="Price (EUR/MWh)",
+              title="Market Clearing Prices - Single 24h Optimization",
+              legend=false, linewidth=3, color=:steelblue,
+              marker=:circle, markersize=4, markerstrokewidth=0,
+              size=(1000, 350))
+    xlims!(p1, 0.5, 24.5)
+    
+    # Plot 2: Generation Mix (stacked area)
+    gen_order = ["Base", "Mid", "Solar", "Wind", "Peak"]
+    gen_colors_map = Dict("Base" => :steelblue, "Mid" => :lightblue, "Solar" => :yellow,
+                          "Wind" => :lightgreen, "Peak" => :coral, "Discharge" => :gold)
+    
+    available_gens = filter(g -> g in keys(dispatch_dict), gen_order)
+    
+    # Get storage and demand data
+    discharge_data = clearing_details[:discharging][1:24]
+    charging_data = clearing_details[:charging][1:24]
+    demand_base = clearing_details[:demand_base][1:24]
+    demand_flex = clearing_details[:demand_flex][1:24]
+    total_demand = demand_base .+ demand_flex .+ charging_data
+    
+    p2 = plot(xlabel="Hour", ylabel="MW",
+              title="Generation Mix",
+              legend=:outerright, size=(1000, 400), legendfontsize=8,
+              yformatter=y -> y >= 1000 ? string(Int(round(y/1000))) * "k" : string(Int(round(y))))
+    
+    # Stack generators manually using fillrange
+    cumsum_prev = zeros(24)
+    for gen in available_gens
+        gen_values = dispatch_dict[gen][1:24]
+        cumsum_curr = cumsum_prev .+ gen_values
+        
+        plot!(p2, hours, cumsum_curr,
+              fillrange=cumsum_prev, label=gen,
+              color=gen_colors_map[gen], alpha=0.8, linewidth=0)
+        
+        cumsum_prev = cumsum_curr
+    end
+    
+    # Add storage discharge on top
+    if maximum(discharge_data) > 0.1
+        cumsum_discharge = cumsum_prev .+ discharge_data
+        plot!(p2, hours, cumsum_discharge,
+              fillrange=cumsum_prev, label="Discharge",
+              color=gen_colors_map["Discharge"], alpha=0.8, linewidth=0)
+        cumsum_prev = cumsum_discharge
+    end
+    
+    # Add demand + charging as a line
+    plot!(p2, hours, total_demand,
+          label="Demand+\nCharging", color=:black, linewidth=2.5, linestyle=:solid)
+    
+    xlims!(p2, 0.5, 24.5)
+    ylims!(p2, 0, maximum([maximum(cumsum_prev), maximum(total_demand)]) * 1.1)
+    
+    # Plot 3: Storage State of Charge
+    # Calculate SOC trajectory from charge/discharge
+    soc_start = clearing_details[:storage_soc_start]
+    soc_trajectory = zeros(25)  # 0 to 24 (25 points)
+    soc_trajectory[1] = soc_start
+    
+    for h in 1:24
+        soc_trajectory[h+1] = soc_trajectory[h] + charging_data[h] - discharge_data[h]
+    end
+    
+    p3 = plot(0:24, soc_trajectory,
+              xlabel="Hour", ylabel="Energy (MWh)",
+              title="Battery State of Charge",
+              legend=false, linewidth=3, color=:purple,
+              marker=:circle, markersize=3, markerstrokewidth=0,
+              size=(1000, 300))
+    xlims!(p3, -0.5, 24.5)
+    
+    # Plot 4: Individual generator dispatch
+    p4 = plot(xlabel="Hour", ylabel="MW",
+              title="Generator Dispatch",
+              legend=:outerright, size=(1000, 350), legendfontsize=8,
+              yformatter=y -> y >= 1000 ? string(Int(round(y/1000))) * "k" : string(Int(round(y))))
+    
+    colors_dispatch = Dict("Base" => :steelblue, "Mid" => :lightblue, "Solar" => :yellow,
+                           "Wind" => :lightgreen, "Peak" => :coral)
+    
+    for gen in available_gens
+        gen_values = dispatch_dict[gen][1:24]
+        plot!(p4, hours, gen_values,
+              label=gen, linewidth=2.5, color=colors_dispatch[gen],
+              marker=:circle, markersize=3, markerstrokewidth=0)
+    end
+    
+    xlims!(p4, 0.5, 24.5)
+    
+    # Combine all plots vertically
+    plot(p1, p2, p3, p4, layout=(4,1), size=(1000, 1400))
 end

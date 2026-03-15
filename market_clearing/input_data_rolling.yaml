@@ -1,11 +1,11 @@
 # Rolling horizon parameters
 rolling_horizon:
-  simulation_days: 30             # total days to simulate (May 2025)
+  simulation_month: 1             # 1=Jan ... 12=Dec
+  simulation_days: 30             # auto-overwritten from simulation_month (year fixed to 2025)
   look_ahead_window: 24           # hours to optimise ahead
-  reclear_frequency: 6            # reclear every N hours
+  reclear_frequency: 1            # reclear every N hours
   gate_closure: 1                 # hours locked from gate closure (no adjustment allowed)
   forecast_noise_std: 0.20        # standard deviation of wind forecast noise (0 = no noise)
-  use_timeseries: true            # use real data from CSV files instead of repeating profiles
 
 
 # Generator parameters
@@ -14,42 +14,49 @@ dispatchableGenerators:
   bidPrice: 30 # EUR/MWh
   capacity: 6000 # MW
   rampRate: 0.20 # fraction of capacity per hour (20% = 200 MW/h for 1000 MW unit)
-  startupTime: 4 # hours required after shutdown before producing again
+  startupTime: 0 # hours required after shutdown before producing again
+  initGen: 0.8 # initial generation as fraction of capacity (80%)
 
  Mid:
   bidPrice: 80 # EUR/MWh
-  capacity: 3000 # MW
+  capacity: 4000 # MW
   rampRate: 0.50 # fraction of capacity per hour (50% = 250 MW/h for 500 MW unit)
-  startupTime: 2 # hours required after shutdown before producing again
+  startupTime: 0 # hours required after shutdown before producing again
+  initGen: 0.5 # initial generation as fraction of capacity (50%)
 
  Peak:
   bidPrice: 150 # EUR/MWh
-  capacity: 1500 # MW
+  capacity: 5000 # MW
   rampRate: 1.0 # fraction of capacity per hour (100% = 500 MW/h for 500 MW unit)
-  startupTime: 1 # hours required after shutdown before producing again
+  startupTime: 0 # hours required after shutdown before producing again
+  initGen: 0.0 # initial generation as fraction of capacity (0%)
 
 variableGenerators:
   Wind:
     bidPrice: 0         # EUR/MWh
-    capacity: 4700      # MW - Actual installed offshore wind capacity in Netherlands
-    # Real data from Dutch system - May 2025 (720 hours)
-    # NOTE: CSV contains actual generation in MW (not availability factors)
-    # Max value in May 2025 data: ~4400 MW (93% capacity factor)
-    dataFile: "offwind_data_2025.csv"
-    dataColumn: "WindOffshore"
-    dateColumn: "StartDateTime"
-    startDate: "01/05/2025 00:00"
-    endDate: "30/05/2025 23:00"
+    capacity: 12000      # MW - Combined onshore + offshore wind capacity
+    # Real data from Dutch system - January 2025 (kW data converted to MW)
+    # NOTE: CSV contains actual generation in kW (converted to MW by dividing by 1000)
+    # Combines onshore and offshore wind
+    dataFile: 
+      - "data/windon_data_2025_ned.csv"
+      - "data/windoff_data_2025_ned.csv"
+    dataColumn: "volume (kWh)"
+    dateColumn: "validfrom (UTC)"
+    conversionFactor: 0.00095  # Convert kW to MW and scale renewables to 95%
+    startDate: "2025-01-01 00:00:00"
+    endDate: "2025-01-30 23:00:00"
   Solar:
     bidPrice: 0         # EUR/MWh
-    capacity: 5000        # MW
-    # Generation 7am-7pm, peak at 13h, symmetric, length = 24
-    profile: [
-      0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-      0.1, 0.2, 0.35, 0.4, 0.5, 0.55,
-      0.6, 0.65, 0.45, 0.4, 0.4, 0.2,
-      0.05, 0.0, 0.0, 0.0, 0.0, 0.0
-    ]
+    capacity: 29000     # MW
+    # Real data from Dutch system - January 2025 (kW data converted to MW)
+    # NOTE: CSV contains actual generation in kW (converted to MW by dividing by 1000)
+    dataFile: "data/solar_data_2025_ned.csv"
+    dataColumn: "volume (kWh)"
+    dateColumn: "validfrom (UTC)"
+    conversionFactor: 0.00095  # Convert kW to MW and scale renewables to 95%
+    startDate: "2025-01-01 00:00:00"
+    endDate: "2025-01-30 23:00:00"
 
 # Storage parameters
 batteryStorage:
@@ -61,15 +68,13 @@ batteryStorage:
 
 # Demand parameters
 demand:
-  # Real data from Dutch system - May 2025 (720 hours)
-  dataFile: "demand_data_2025.csv"
-  dataColumn: "AverageLoad"
-  dateColumn: "StartDateTime"
-  startDate: "01/05/2025 00:00"
-  endDate: "30/05/2025 23:00"
-  
-  # Scalar adjustment to all demand values (MW)
-  adjustment: -2000  # MW
+  # Real data from Dutch system - January 2025 (kW data converted to MW)
+  dataFile: "data/demand_data_2025_ned2.csv"
+  dataColumn: "volume (kWh)"
+  dateColumn: "validfrom (UTC)"
+  conversionFactor: 0.001  # Convert kW to MW
+  startDate: "01/01/2025 00:00"
+  endDate: "30/01/2025 23:00"
   
   segments:
     Base:

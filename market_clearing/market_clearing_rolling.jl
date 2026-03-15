@@ -58,26 +58,30 @@ all_results[:dispatch] = Dict{Int, Dict}()                  # dispatch[clearing]
 all_results[:clearing_details] = Dict{Int, Dict}()
 
 # Initialise generator dispatch for ramping constraints
-# For the first clearing, use hour 0 dispatch from the full timeseries (prep hour)
+# Use initial dispatch levels from config to avoid artificial ramping constraints in first clearing
 prev_g_dispatch = Dict{String, Float64}()
 disp_gen_names = Set{String}(String(gname) for (gname, _) in cfg["dispatchableGenerators"])
+
 for g in IG
-    # Hour 0 is prep hour - for dispatchable generators, start at 100% capacity (warm and available)
-    # For variable generators, use their hour 0 value
     if g in disp_gen_names
-        prev_g_dispatch[g] = Q_gen_full[(g, 0)]  # Start at 100% capacity
+        # Read initGen from config (fraction of capacity)
+        gdata = cfg["dispatchableGenerators"][g]
+        init_fraction = float(get(gdata, "initGen", 0.5))  # default to 50% if not specified
+        prev_g_dispatch[g] = Q_gen_full[(g, 0)] * init_fraction
     else
-        prev_g_dispatch[g] = Q_gen_full[(g, 0)]  # Use hour 0 availability
+        # Variable generators: use their hour 0 availability
+        prev_g_dispatch[g] = Q_gen_full[(g, 0)]
     end
 end
 
-# Set q_prev to match initial dispatch for first clearing
-# q_prev[g,h] = financial position = previous g_planned value
-# Initialize to starting dispatch so gate closure doesn't conflict with ramping
+# Set q_prev = 0 for all hours in first clearing
+# All initial positions will be captured as q trades in the first clearing
+# The ramping constraint (using g_init) handles physical continuity independently
 prev_q_financial = Dict{Tuple{String,Int},Float64}()
 for g in IG
     for h in 1:look_ahead
-        prev_q_financial[(g, h)] = prev_g_dispatch[g]
+        # All hours start fresh - no previous intraday position
+        prev_q_financial[(g, h)] = 0.0
     end
 end
 
@@ -200,8 +204,21 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     m.ext[:sets][:JH] = 1:look_ahead
     
     # Prepare Q_prev: Drop the executed hours (given by reclear_freq hours) and reindex 
-    # the remaining financial positions relative to the new clearing time 
-    Q_prev = prepare_Q_prev_for_next_window(prev_q_financial, look_ahead, IG, reclear_freq)
+    # the remaining financial positions relative to the new clearing time
+    # For first clearing: use prev_q_financial directly (no shifting needed)
+    # For subsequent clearings: shift window forward
+    if clearing_count == 1
+        # First clearing: use initialization directly
+        Q_prev = Dict{Tuple{String,Int},Float64}()
+        for g in IG
+            for h in 1:look_ahead
+                Q_prev[(g, h)] = prev_q_financial[(g, h)]
+            end
+        end
+    else
+        # Subsequent clearings: shift window forward
+        Q_prev = prepare_Q_prev_for_next_window(prev_q_financial, look_ahead, IG, reclear_freq)
+    end
     
     # Store time series for this window
     m.ext[:timeseries] = Dict{Symbol,Any}()
@@ -265,6 +282,8 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     # Store detailed data for this clearing (including demand and storage)
     all_results[:clearing_details][clearing_count] = Dict(
         :current_hour => current_hour,
+        :executed_hours => reclear_freq,
+        :look_ahead => look_ahead,
         :Q_prev => Q_prev,
         :q => q_val,
         :g_planned => g_planned_val,
@@ -311,59 +330,6 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
 
     if clearing_count <= 5 || clearing_count % 50 == 0
         println("Clearing $clearing_count (global hour $current_hour): Price h=1: $λ_h1 €/MWh | SOC_end: $soc_end MWh | Ch=$(round(Qch_val[h]; digits=1)) | Dis=$(round(Qdis_val[h]; digits=1))")
-    end
-
-    # Detailed diagnostics for first 5 clearings
-    if clearing_count <= 5
-        price_setters = String[]
-
-        # 1) Flex marginal?
-        flex_cap = m.ext[:timeseries][:Q_dem][("Flex", h)]
-        flex_served = Qd_val["Flex", h]
-        if flex_served > 0 && flex_served < flex_cap
-            push!(price_setters, "Flex (marginal, bid=50)")
-        end
-
-        # 2) Any generator marginal?
-        for g in ["Wind", "Solar", "Base", "Mid", "Peak"]
-            if g in IG
-                cap = m.ext[:timeseries][:Q_gen][(g, h)]
-                disp = g_planned_val[g, h]
-                if disp > 0 && disp < cap
-                    bid = m.ext[:timeseries][:Pr_gen][(g, h)]
-                    push!(price_setters, "$g (marginal, bid=$(round(bid; digits=1)))")
-                end
-            end
-        end
-
-        # 3) Storage marginal?
-        # Charging marginal if charging >0 and not at cap and SOC not at upper bound
-        if Qch_val[h] > 0 && Qch_val[h] < P_cap && SOC_val[h] < E_cap
-            push!(price_setters, "Storage charging (marginal)")
-        end
-        # Discharging marginal if discharging >0 and not at cap and SOC not at lower bound
-        if Qdis_val[h] > 0 && Qdis_val[h] < P_cap && SOC_val[h] > 0
-            push!(price_setters, "Storage discharging (marginal)")
-        end
-
-        if isempty(price_setters)
-            println("  Price setter: none clearly marginal (likely a binding constraint / corner solution).")
-        else
-            println("  Price setter: " * join(price_setters, " | "))
-        end
-
-        # Print key positions
-        for g in ["Wind", "Solar", "Base", "Mid", "Peak"]
-            if g in IG
-                cap = m.ext[:timeseries][:Q_gen][(g, h)]
-                qh  = round(q_val[g, h]; digits=1)
-                gp  = round(g_planned_val[g, h]; digits=1)
-                println("  $g: cap=$(round(cap; digits=1)) q=$(qh) g_planned=$(gp)")
-            end
-        end
-
-        # Flex status
-        println("  Flex: served=$(round(flex_served; digits=1)) / cap=$(round(flex_cap; digits=1))")
     end
 end
 
