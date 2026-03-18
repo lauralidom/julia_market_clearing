@@ -8,9 +8,6 @@ include("../output_data/process_data.jl")
 
 function plot(resultset)
 
-
-    # todo, should be a graph
-
     time_periods = ProcessData.TimePeriods(resultset)
 
 	sew = ProcessData.SocioEconomicWelfare_T(resultset)
@@ -26,7 +23,6 @@ function plot(resultset)
     for (i, sew_outcome) in enumerate(sew)
         stack_matrix[1, i] = sew_outcome.ProducerSurplus
         stack_matrix[2, i] = sew_outcome.ConsumerSurplus
-
     end
 
     # Create stacked area plot

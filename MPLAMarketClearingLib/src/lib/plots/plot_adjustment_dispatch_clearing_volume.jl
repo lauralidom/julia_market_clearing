@@ -8,10 +8,7 @@ include("../output_data/process_data.jl")
 
 function plot(resultset)
 
-
-    # todo, should be a graph
-
-    time_periods = ProcessData.DispatchedTimePeriods(resultset)
+    time_periods = ProcessData.TimePeriods(resultset)
 
 	transactions = ProcessData.Transactions(resultset)
 

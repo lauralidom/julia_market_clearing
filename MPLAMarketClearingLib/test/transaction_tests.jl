@@ -56,19 +56,19 @@ end
 	clearingData.StorageStateOfCharge = [50,50]
 	
 	# WHEN transactions are derived
-	transactions = HelperModelResults.Transactions(clearingData, [])
+	transactions = HelperModelResults.Transactions(clearingData, [], "test")
 	println(transactions)
 	# THEN the transactions match expected values
 
 	firstClearingExpectedTransactions = Vector{HelperModelResults.Transaction}([
-		HelperModelResults.MakeTransaction("Wind", 40, 50, 1, 1, HelperModelResults.PARTY_GENERATOR),
-		HelperModelResults.MakeTransaction("Wind", 50, 60, 2, 1, HelperModelResults.PARTY_GENERATOR),
-		HelperModelResults.MakeTransaction("Base", 30, 50, 1, 1, HelperModelResults.PARTY_GENERATOR),
-		HelperModelResults.MakeTransaction("Base", 30, 60, 2, 1, HelperModelResults.PARTY_GENERATOR),
-		HelperModelResults.MakeTransaction("Base_D", 70, 50, 1, 1, HelperModelResults.PARTY_DEMAND),
-		HelperModelResults.MakeTransaction("Base_D", 70, 60, 2, 1, HelperModelResults.PARTY_DEMAND),
-		HelperModelResults.MakeTransaction("Flex", 50, 50, 1, 1, HelperModelResults.PARTY_DEMAND),
-		HelperModelResults.MakeTransaction("Flex", 60, 60, 2, 1, HelperModelResults.PARTY_DEMAND)
+		HelperModelResults.MakeTransaction("Wind", 40, 50, 1, 1, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Wind", 50, 60, 2, 1, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Base", 30, 50, 1, 1, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Base", 30, 60, 2, 1, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Base_D", 70, 50, 1, 1, HelperModelResults.PARTY_DEMAND,"test"),
+		HelperModelResults.MakeTransaction("Base_D", 70, 60, 2, 1, HelperModelResults.PARTY_DEMAND,"test"),
+		HelperModelResults.MakeTransaction("Flex", 50, 50, 1, 1, HelperModelResults.PARTY_DEMAND,"test"),
+		HelperModelResults.MakeTransaction("Flex", 60, 60, 2, 1, HelperModelResults.PARTY_DEMAND,"test")
 	])
 
 	@testset "Test First Clearing" begin
@@ -99,6 +99,51 @@ end
 	clearingData2.StorageStateOfCharge = [50,50]
 
 	# WHEN transactions are derived
+	transactions2 = HelperModelResults.Transactions(clearingData2,resultset, "test")
+
+	# THEN the transactions match expected values
+
+	secondClearingExpectedTransactions = Vector{HelperModelResults.Transaction}([
+		HelperModelResults.MakeTransaction("Wind", -10, 65, 2, 2, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Wind", 50, 70, 3, 2, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Base", 30, 70, 3, 2, HelperModelResults.PARTY_GENERATOR,"test"),
+		HelperModelResults.MakeTransaction("Base_D", 70, 70, 3, 2, HelperModelResults.PARTY_DEMAND,"test"),
+		HelperModelResults.MakeTransaction("Flex", 5, 65, 2, 2, HelperModelResults.PARTY_DEMAND,"test"),
+		HelperModelResults.MakeTransaction("Flex", 50, 70, 3, 2, HelperModelResults.PARTY_DEMAND,"test")
+	])
+
+	for transaction in transactions2
+		println(transaction)
+	end
+
+	@testset "Test Second Clearing" begin
+		@test length(transactions2) == 6
+		@test countDemandTransactions(transactions2) == 3
+		@test countGeneratorTransactions(transactions2) == 3
+		for expectedTransaction in secondClearingExpectedTransactions
+			@test countMatchingTransactions(transactions2, expectedTransaction) == 1
+		end
+	end
+
+
+
+
+	# GIVEN a pair of result set which skips some time between
+	#=
+	resultset = [clearingData]
+
+	clearingData2 = ProcessData.ClearingData()
+	clearingData2.BaseTimePeriod = 2
+	clearingData2.TimePeriods = [2,3]
+	clearingData2.Prices = [65,70]
+	clearingData2.GenData = Dict{}("Wind"=> [40,50], "Base" => [30,30] )
+	clearingData2.BidPrices = Dict{}("Wind"=> [0,0], "Base" => [0,30], "Base_D" => [300,300], "Flex" => [50,50] )
+	clearingData2.DemandData = Dict{}("Base_D" => [70,70], "Flex" => [65,50] )
+	clearingData2.StorageDischargeQuantities = [0,0]
+	clearingData2.StorageChargeQuantities = [0,0]
+	clearingData2.StorageStateOfCharge = [50,50]
+
+	# WHEN transactions are derived
 	transactions2 = HelperModelResults.Transactions(clearingData2,resultset)
 
 	# THEN the transactions match expected values
@@ -112,6 +157,10 @@ end
 		HelperModelResults.MakeTransaction("Flex", 50, 70, 3, 2, HelperModelResults.PARTY_DEMAND)
 	])
 
+	for transaction in transactions2
+		println(transaction)
+	end
+
 	@testset "Test Second Clearing" begin
 		@test length(transactions2) == 6
 		@test countDemandTransactions(transactions2) == 3
@@ -120,4 +169,5 @@ end
 			@test countMatchingTransactions(transactions2, expectedTransaction) == 1
 		end
 	end
+	=#
 end

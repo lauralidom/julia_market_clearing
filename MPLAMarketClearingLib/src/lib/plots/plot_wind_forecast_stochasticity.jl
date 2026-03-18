@@ -7,7 +7,7 @@ using Statistics
 include("../output_data/process_data.jl")
 
 function plot(resultset)
-	plot_solar = true
+	plot_solar = false
 	# below copied from Laura and modified - TA
 
     # Wind generation evolution across clearings
@@ -33,10 +33,9 @@ function plot(resultset)
         start_time_period % noise_clearing_ratio !== 0 && continue
         # X-axis:
         global_time_periods = start_time_period:(start_time_period + length(bid_quantities) - 1)
-        
         # Plot this clearing's wind forecast
         Plots.plot!(p3, global_time_periods, bid_quantities,
-            label="Clearing $start_time_period", color=colors[start_time_period], alpha=0.8)
+            label="Clearing $start_time_period", color=colors[start_time_period % length(time_periods) + 1], alpha=0.8)
         
     end
 
@@ -49,7 +48,7 @@ function plot(resultset)
 	        
 	        # Plot this clearing's wind forecast
 	        Plots.plot!(p3, global_time_periods, bid_quantities,
-	            label="Clearing $start_time_period (solar)", color=colors[start_time_period], alpha=0.8)
+	            label="Clearing $start_time_period (solar)", color=colors[start_time_period % length(time_periods) + 1], alpha=0.8)
 	    end 
     end
     display(p3)
