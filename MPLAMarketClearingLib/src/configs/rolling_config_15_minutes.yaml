@@ -8,6 +8,8 @@ clearingInterval: 1 # number of time periods between market clearing/optimizatio
 clearingWindow: 96 # number of time periods to consider in each round
 storageValue: 50 # experiment: value of stored MWh at end of window in objective function
 noiseLevel: .15 # tweak noise magnitude in variable generators
+lookAheadDistance: 0
+marketGenerationStrategy: repeat
 
 # Generator parameters
 dispatchableGenerators:

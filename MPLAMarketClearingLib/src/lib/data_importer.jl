@@ -19,17 +19,19 @@ function load_input_data(path::String)
 
     # string defining which model/strategy we want to use to clear the market
     data[:strategy] = String(cfg["strategy"])
+    data[:marketGenerationStrategy] = String(cfg["marketGenerationStrategy"])
 
     if data[:strategy] != "basic"
         data[:clearForDays] = Int(cfg["clearForDays"])
         data[:timePeriodsPerDay] = Int(cfg["timePeriodsPerDay"]) # number of time periods (timesteps) in each day
         data[:clearingInterval] = Int(cfg["clearingInterval"])
         data[:clearingWindow] = Int(cfg["clearingWindow"])
+        data[:lookAheadDistance] = haskey(cfg,"lookAheadDistance") ? Int(cfg["lookAheadDistance"]) : 0
         data[:storageValue] = Int(cfg["storageValue"]) # experiment: value of stored MWh at end of window in objective function
         data[:noiseLevel] = float(cfg["noiseLevel"])
     end
 
-    if data[:strategy] == "fixed_horizon_status_quo"
+    if data[:marketGenerationStrategy] == "explicit"
         data[:marketSequence] = []
         for (name, market) in get(cfg,"marketSequence",Dict())
             addMarket = Dict{Symbol,Any}()

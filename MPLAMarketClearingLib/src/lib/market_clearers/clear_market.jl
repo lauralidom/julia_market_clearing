@@ -47,49 +47,6 @@ function ClearBasic(data)
     PlotGenerationStack.plot(m)
 end
 
-function ClearRolling(data, with_ramps)
-
-	time_period_range = range(1,data[:clearForDays]*data[:timePeriodsPerDay] - data[:clearingWindow]) # go from time_period 1 to the last window for which we have a full data set
-    previous_time_period_data = Dict(
-    	:SOC => data[:batteryStorage]["initialSOC"]*data[:batteryStorage]["energyCapacity"],
-    	:Q_gen => Dict{String,Float64}( (g, float(gConfig["initialQuantity"])) for (g, gConfig) in data[:dispatchableGenerators])
-    )
-
-    resultset = ProcessData.CreateResultSet()
-    for t in time_period_range
-		m = with_ramps ? RollingModelWithRampRates.build_for_time_period(data,t,previous_time_period_data) : RollingModel.build_for_time_period(data,t,previous_time_period_data) 
-	    optimize!(m)
-	    # println("Termination status: ", termination_status(m))
-	    # println("Objective value: ", objective_value(m))
-
-	    ProcessData.AddToResultSet!(resultset, m, t, "rolling")
-
-	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
-	    previous_time_period_data[:SOC] = HelperModelResults.SOCValues(m)[t+data[:clearingInterval]]
-	    
-	end
-
-	# println(resultset)
-	priceSets = ProcessData.GetPriceSets(resultset)
-
-	PlotPriceEvolution.plot(priceSets)
-	PlotGenerationStackRolling.plot(resultset)
-	PlotDispatchChangesForHour.plot(resultset,"Wind",25) # TODO: rename hour
-	PlotStateOfChargeRolling.plot(resultset)
-	PlotPeakGenerationAndStorageUse.plot(resultset)
-	PlotWindForecastStochasticity.plot(resultset)
-
-	PlotBaselineOutcomes.plot(resultset)
-
-	PlotTransactionVolumes.plot(resultset, 65)
-	PlotAdjustmentDispatchClearingVolume.plot(resultset)
-	#= TODO: fix these plots for the new rolling approach
-	    PlotMarketPricesWithStorage.plot(m)
-	    PlotStateOfCharge.plot(m)
-	    PlotGenerationStack.plot(m)
-	=#
-end
-
 # TODO: tests around these functions, they are important.
 
 
@@ -106,17 +63,30 @@ end
 function generateMarketSetForTimePeriod(t, data)
 	markets = []
 
-	for market in data[:marketSequence]
-		if marketMatch(t, market, data[:timePeriodsPerDay])
-			push!(markets, market)
+	if data[:marketGenerationStrategy] == "explicit"
+		for market in data[:marketSequence]
+			if marketMatch(t, market, data[:timePeriodsPerDay])
+				push!(markets, market)
+			end
 		end
+	elseif data[:marketGenerationStrategy] == "repeat"
+		if t % data[:clearingInterval] == 0
+			addMarket = Dict{Symbol,Any}()
+            addMarket[:name] = data[:strategy]
+            addMarket[:clearingInterval] = data[:clearingInterval] # number of time periods between market clearing/optimization rounds
+            addMarket[:clearingWindow] = data[:clearingWindow] # number of time periods to consider in each round
+            addMarket[:lookAheadDistance] = data[:lookAheadDistance] # window under consideration starts lookAheadDistance time periods ahead
+			push!(markets,addMarket)
+		end
+	else
+		throw("unrecognized marketGenerationStrategy: check config: $(data[:marketGenerationStrategy])")
 	end
 
 	return markets
 end
 
 
-function ClearFixedHorizonStatusQuo(data)
+function ClearWithFlexibleModel(data)
 	# TODO: revisit clearing window idea
 	time_period_range = range(1,data[:clearForDays]*data[:timePeriodsPerDay] - data[:clearingWindow]) # go from time_period 1 to the last window for which we have a full data set
     
@@ -166,16 +136,15 @@ function ClearFixedHorizonStatusQuo(data)
 	PlotTransactionVolumes.plot(resultset, resultset[6].ClearingTimePeriod, resultset[6].MarketName)
 	PlotTransactionVolumes.plot(resultset, resultset[7].ClearingTimePeriod, resultset[7].MarketName)
 	# PlotAdjustmentDispatchClearingVolume.plot(resultset)
-
 end
 	
 function Clear(data)
 	if data[:strategy] == "rolling"
 		ClearRolling(data, false)
 	elseif data[:strategy] == "rolling_with_ramps"
-		ClearRolling(data, true)
+		ClearWithFlexibleModel(data)
 	elseif data[:strategy] == "fixed_horizon_status_quo"
-		ClearFixedHorizonStatusQuo(data)
+		ClearWithFlexibleModel(data)
 	else
 		print("strategy not recognized, using basic clearing: ", data[:strategy])
 		ClearBasic(data)
