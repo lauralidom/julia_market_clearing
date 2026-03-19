@@ -30,7 +30,7 @@ function load_input_data(path::String)
 end
 
 # 0.1: Derive simulation date range from a single month input in YAML.
-# Updates rolling_horizon.simulation_days and all CSV-backed start/end dates.
+# Updates CSV-backed start/end dates only; rolling_horizon.simulation_days stays as configured.
 function apply_simulation_month!(cfg::Dict)
     rh = get(cfg, "rolling_horizon", nothing)
     if rh === nothing
@@ -47,9 +47,6 @@ function apply_simulation_month!(cfg::Dict)
     month_end = lastdayofmonth(month_start)
     start_dt = DateTime(month_start)
     end_dt = DateTime(month_end) + Hour(23)
-
-    # Keep simulation_days consistent with selected month.
-    rh["simulation_days"] = day(month_end)
 
     iso_fmt = dateformat"yyyy-mm-dd HH:MM:SS"
     euro_fmt = dateformat"dd/mm/yyyy HH:MM"
@@ -384,45 +381,61 @@ function get_window_timeseries(Pr_gen_full, Q_gen_full, Pr_dem_full, Q_dem_full,
 end
 
 # 4: Add wind forecast noise to simulate uncertainty
-# Uses t-distribution (df=5) with square root decay for realistic forecast errors
+# Uses t-distribution (df=10) with square root decay for realistic forecast errors
 # Hour 1: no noise (forecast = realized wind)
 # Hour 24: maximum noise (std_dev = max_std)
 # Noise decreases with concave curve (sqrt) as we get closer to real-time
-function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, max_noise_std::Float64, 
-                                   IG::Vector, window_length::Int)
+# Applies AR(1) autocorrelated forecast errors to the wind generation
+
+const phi = 0.8  # AR(1) autocorrelation coefficient for wind forecast errors, 0.0 errors are independent, 0.8 is strong correlation (recommended for wind)
+
+function add_wind_forecast_noise!(Q_gen_window::Dict,cfg::Dict,max_noise_std::Float64,
+IG::Vector,window_length::Int,forecast_error_per_hour::Dict{Int, Float64},
+window_start_hour::Int)
     if max_noise_std == 0.0
-        return  # no noise
+        return
     end
-    
+
     var_gen = cfg["variableGenerators"]
-    t_dist = TDist(10)  # t-distribution with 10 degrees of freedom (fat tails)
-    
+    t_dist = TDist(10)
+
     for (gname, gdata_any) in var_gen
         g = String(gname)
-        # Only apply noise to Wind - other generators like Solar have deterministic profiles
+
         if g in IG && g == "Wind"
             Q = float(gdata_any["capacity"])
-            
-            # Apply noise to all hours with time-dependent decay
+
             for h in 1:window_length
-                # Calculate time-dependent std dev using square root decay
-                # h=1 → zero noise (real wind), h=window_length → max noise
+                # Absolute delivery hour in the full simulation
+                abs_hour = window_start_hour + h - 1
+
+                # Hour 1 = realised wind, so no forecast error
                 if h == 1
-                    continue  # No noise at h=1, forecast = reality
+                    forecast_error_per_hour[abs_hour] = 0.0
+                    continue
                 end
-                
+
+                # Step 1: lead-time dependent std dev
                 time_factor = sqrt((h - 1) / (window_length - 1))
                 std_dev = max_noise_std * time_factor
-                
-                # Current forecast (already in MW, but we work with availability factor for noise)
+
+                # Step 2: get previous error for this same delivery hour
+                prev_error = get(forecast_error_per_hour, abs_hour, 0.0)
+
+                # Step 3: add correlated update
+                # sqrt(1 - phi^2) keeps the overall volatility roughly at std_dev
+                innovation = rand(t_dist) * std_dev * sqrt(1 - phi^2)
+                new_error = phi * prev_error + innovation
+
+                # Step 4: apply multiplicative error: it depends on current forecast not total capacity
                 current_value = Q_gen_window[(g, h)]
                 current_af = current_value / Q
-                
-                # Add t-distributed noise (fatter tails than Gaussian)
-                noise = rand(t_dist) * std_dev
-                new_af = clamp(current_af + noise, 0.0, 1.0)
-                
+
+                new_af = clamp(current_af * (1 + new_error), 0.0, 1.0)
                 Q_gen_window[(g, h)] = Q * new_af
+
+                # Step 5: store updated error for next forecast refresh
+                forecast_error_per_hour[abs_hour] = new_error
             end
         end
     end

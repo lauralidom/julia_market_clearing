@@ -22,7 +22,7 @@ local clearing_count, m, q_val, g_planned_val, Qd_val, λ, SOC_val, prev_q_finan
 
 # Load configuration
 cfg = YAML.load_file("input_data_rolling.yaml")
-sim_days = Int(cfg["rolling_horizon"]["simulation_days"])  # Read BEFORE apply_simulation_month! overwrites it
+sim_days = Int(cfg["rolling_horizon"]["simulation_days"])
 apply_simulation_month!(cfg)
 
 # Extract parameters
@@ -63,6 +63,10 @@ all_results = Dict{Symbol,Any}()
 all_results[:clearing_times] = Int[]                        # Global hour of each clearing
 all_results[:prices] = Dict{Int, Vector{Float64}}()         # prices[clearing] = [λ per hour]
 all_results[:dispatch] = Dict{Int, Dict}()                  # dispatch[clearing][generator] = g_planned values
+all_results[:storage_energy_capacity] = float(cfg["batteryStorage"]["energyCapacity"])
+
+# Store daily end SOCs for reporting
+all_results[:daily_end_soc] = Float64[]
 
 # Detailed clearing data for analysis
 all_results[:clearing_details] = Dict{Int, Dict}()
@@ -109,6 +113,14 @@ all_daily_prices = Float64[]
 
 # ========== MAIN DAY LOOP ==========
 # Run each day as a separate 24-hour market (like independent daily markets)
+
+# Initialize wind forecast error state for AR(1) smoothing (fixed horizon)
+forecast_error_per_hour = Dict{Int, Float64}()
+
+# Keep battery SOC continuous across days in the fixed-horizon simulation.
+# The market horizon still resets daily; only the physical storage state carries over.
+storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["batteryStorage"]["energyCapacity"])
+
 clearing_count = 0
 
 for current_day in 1:sim_days
@@ -148,8 +160,7 @@ for current_day in 1:sim_days
         end
     end
     
-    # Reset storage state
-    storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["batteryStorage"]["energyCapacity"])
+    # Battery state stays continuous across days
     day_start_soc = storage_soc_carryover
     day_end_soc = storage_soc_carryover
     day_first_price = 0.0
@@ -222,9 +233,9 @@ for current_day in 1:sim_days
             end
         end
         
-        # Add forecast noise to wind
+        # Add forecast noise to wind (AR(1) smoothing, fixed horizon)
         if forecast_noise > 0.0
-            add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, current_look_ahead)
+            add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, current_look_ahead, forecast_error_per_hour, global_hour)
         end
         
         # Override executed hours with realized values
@@ -337,8 +348,23 @@ for current_day in 1:sim_days
             :demand_flex => [Qd_val["Flex", h] for h in 1:current_look_ahead],
             :charging => [Qch_val[h] for h in 1:current_look_ahead],
             :discharging => [Qdis_val[h] for h in 1:current_look_ahead],
-            :storage_soc_start => m.ext[:parameters][:storage_initial_soc]
+            :storage_soc_start => m.ext[:parameters][:storage_initial_soc],
+            :storage_soc_path => [SOC_val[h] for h in 1:current_look_ahead],
+            :storage_soc_end_executed => SOC_val[actual_executed_hours],
+            :storage_soc_end_window => SOC_val[current_look_ahead],
+            :wind_available_h1 => Q_gen_window[("Wind", 1)],
+            :wind_executed_h1 => g_planned_val["Wind", 1],
+            :wind_curtailment_h1 => max(0.0, Q_gen_window[("Wind", 1)] - g_planned_val["Wind", 1])
         )
+
+        # Print if curtailment is nonzero (tolerance 1e-6)
+        wind_curtailment_h1 = max(0.0, Q_gen_window[("Wind", 1)] - g_planned_val["Wind", 1])
+        if !haskey(all_results, :curtailment_energy)
+            all_results[:curtailment_energy] = Float64[]
+        end
+        if wind_curtailment_h1 > 1e-6
+            push!(all_results[:curtailment_energy], wind_curtailment_h1)
+        end
         
         # Update state for next clearing within this day
         if iteration_idx < length(clearing_iterations)
@@ -377,13 +403,28 @@ for current_day in 1:sim_days
         λ_h1 = 0.0
     end
     println("Day $current_day/$sim_days | P(h1): $λ_h1 €/MWh | Avg/Min/Max: $(round(day_avg_price; digits=1))/$(round(day_min_price; digits=1))/$(round(day_max_price; digits=1)) €/MWh | SOC: $(round(day_start_soc; digits=1))->$(round(day_end_soc; digits=1)) MWh | Ch/Dis(h1): $(round(day_first_charge; digits=1))/$(round(day_first_discharge; digits=1)) MW")
+        # Store daily end SOC for reporting
+        push!(all_results[:daily_end_soc], day_end_soc)
+
+    # Carry the realized end-of-day SOC into the next day.
+    storage_soc_carryover = day_end_soc
     
 end  # End day loop
 
 println()
 println("========================================")
+
 println("SIMULATION COMPLETE")
 println("========================================")
+
+total_clearings = clearing_count
+curtailment_events = haskey(all_results, :curtailment_energy) ? length(all_results[:curtailment_energy]) : 0
+total_curtailment = haskey(all_results, :curtailment_energy) ? sum(all_results[:curtailment_energy]) : 0.0
+if curtailment_events > 0
+    println("[SUMMARY] Wind curtailment in h=1: ", curtailment_events, " hours with curtailment, totaling ", round(total_curtailment; digits=2), " MWh across ", total_clearings, " clearings.")
+else
+    println("[SUMMARY] No wind curtailment in h=1.")
+end
 
 # Summary statistics across all days
 println("Mode: Rolling Fixed (shrinking horizon within each day)")

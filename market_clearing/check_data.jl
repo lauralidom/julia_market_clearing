@@ -14,14 +14,14 @@
 using CSV, DataFrames, Dates, Plots, Printf
 
 # ---- Configuration: toggle what to inspect ----
-SHOW_DEMAND  = false
-SHOW_SOLAR   = false
-SHOW_WINDON  = false
-SHOW_WINDOFF = false
+SHOW_DEMAND  = true
+SHOW_SOLAR   = true
+SHOW_WINDON  = true
+SHOW_WINDOFF = true
 
 # Which months to include (1 = Jan … 12 = Dec).
 # Use 1:12 for all months, or e.g. [5] for May only, or [1,2,3] for Q1.
-SHOW_MONTHS = [6]
+SHOW_MONTHS = [5]
 
 # Set to true to overlay all enabled datasets on one shared graph.
 # Labels will read "Demand – May", "Solar – May", etc.

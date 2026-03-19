@@ -18,6 +18,7 @@ local clearing_count, m, q_val, g_planned_val, Qd_val, λ, SOC_val, prev_q_finan
 
 # Load configuration
 cfg = YAML.load_file("input_data_rolling.yaml")
+apply_simulation_month!(cfg)
 
 # Extract rolling horizon parameters
 rh_params = cfg["rolling_horizon"]
@@ -53,6 +54,7 @@ all_results = Dict{Symbol,Any}()
 all_results[:clearing_times] = Int[]                        # Global hour of each clearing
 all_results[:prices] = Dict{Int, Vector{Float64}}()         # prices[clearing] = [λ per hour]
 all_results[:dispatch] = Dict{Int, Dict}()                  # dispatch[clearing][generator] = g_planned values
+all_results[:storage_energy_capacity] = float(cfg["batteryStorage"]["energyCapacity"])
 
 # Detailed clearing data for analysis
 all_results[:clearing_details] = Dict{Int, Dict}()
@@ -104,6 +106,8 @@ storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["
 # Start from hour 1 (skip hour 0 which is prep hour with zero demand)
 
 clearing_count = 0
+# Initialize wind forecast error state for AR(1) smoothing
+forecast_error_per_hour = Dict{Int, Float64}()
 
 for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     clearing_count += 1
@@ -174,9 +178,9 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
         end
     end
     
-    # Add forecast noise to wind (applies to all hours, with decay making h=1 converge to real wind)
+    # Add autocorrelated forecast noise to wind (AR(1) smoothing across windows)
     if forecast_noise > 0.0
-        add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, look_ahead)
+        add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, look_ahead, forecast_error_per_hour, current_hour)
     end
     
     # Override executed hours (1 to reclear_freq) with REALIZED renewable values
@@ -273,6 +277,7 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     # Extract battery variables for storage
     Qch_val = value.(m.ext[:variables][:Qch])
     Qdis_val = value.(m.ext[:variables][:Qdis])
+    SOC_val = value.(m.ext[:variables][:SOC])
     
     # Store results
     push!(all_results[:clearing_times], current_hour)
@@ -292,8 +297,23 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
         :demand_flex => [Qd_val["Flex", h] for h in 1:look_ahead],
         :charging => [Qch_val[h] for h in 1:look_ahead],
         :discharging => [Qdis_val[h] for h in 1:look_ahead],
-        :storage_soc_start => m.ext[:parameters][:storage_initial_soc]
+        :storage_soc_start => m.ext[:parameters][:storage_initial_soc],
+        :storage_soc_path => [SOC_val[h] for h in 1:look_ahead],
+        :storage_soc_end_executed => SOC_val[reclear_freq],
+        :storage_soc_end_window => SOC_val[look_ahead],
+        :wind_available_h1 => Q_gen_window[("Wind", 1)],
+        :wind_executed_h1 => g_planned_val["Wind", 1],
+        :wind_curtailment_h1 => max(0.0, Q_gen_window[("Wind", 1)] - g_planned_val["Wind", 1])
     )
+
+    # Accumulate curtailment mismatches for summary reporting
+    wind_curtailment_h1 = max(0.0, Q_gen_window[("Wind", 1)] - g_planned_val["Wind", 1])
+    if !haskey(all_results, :curtailment_energy)
+        all_results[:curtailment_energy] = Float64[]
+    end
+    if wind_curtailment_h1 > 1e-6
+        push!(all_results[:curtailment_energy], wind_curtailment_h1)
+    end
     
     # Extract updated position for next window as financial position
     # g_planned[g,h] from this clearing becomes q_prev[g,h] in next clearing
@@ -347,6 +367,15 @@ println("  Max: $(round(max_price; digits=2)) €/MWh")
 println()
 
 # Plot results
+
+total_clearings = clearing_count
+curtailment_events = haskey(all_results, :curtailment_energy) ? length(all_results[:curtailment_energy]) : 0
+total_curtailment = haskey(all_results, :curtailment_energy) ? sum(all_results[:curtailment_energy]) : 0.0
+if curtailment_events > 0
+    println("[SUMMARY] Wind curtailment in h=1: ", curtailment_events, " hours with curtailment, totaling ", round(total_curtailment; digits=2), " MWh across ", total_clearings, " clearings.")
+else
+    println("[SUMMARY] No wind curtailment in h=1.")
+end
 p = plot_rolling_horizon_results(all_results)
 savefig(p, "rolling_horizon_results.png")
 println("Plot saved to: rolling_horizon_results.png")

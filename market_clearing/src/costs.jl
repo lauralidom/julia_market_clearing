@@ -517,6 +517,7 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
     daily_metrics = calculate_average_daily_metrics(all_results, cfg)
     
     sim_days = daily_metrics[:sim_days]
+    clearing_details = all_results[:clearing_details]
 
     # Helpers
     col_label(n::Int) = begin
@@ -526,8 +527,10 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
         end
         s
     end
-    write_row!(sh, r::Int, values::Vector{Any}) = (for (j,v) in enumerate(values); sh["$(col_label(j))$(r)"] = v; end)
-    write_text!(sh, r::Int, text::String) = (sh["A$(r)"] = text)
+    write_row_at!(sh, r::Int, start_col::Int, values::Vector{Any}) = (for (j,v) in enumerate(values); sh["$(col_label(start_col + j - 1))$(r)"] = v; end)
+    write_row!(sh, r::Int, values::Vector{Any}) = write_row_at!(sh, r, 1, values)
+    write_text_at!(sh, r::Int, col::Int, text::String) = (sh["$(col_label(col))$(r)"] = text)
+    write_text!(sh, r::Int, text::String) = write_text_at!(sh, r, 1, text)
 
     XLSX.openxlsx(path, mode="w") do xf
         sh = XLSX.addsheet!(xf, "Summary")
@@ -535,6 +538,36 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
 
         # Title
         write_text!(sh, row, "ECONOMIC SUMMARY ($(sim_days) days simulation)"); row += 2
+
+        # Top summary blocks
+        total_executed_energy = sum(values(revenues_exec[:generator_energy]))
+        avg_executed_price = total_executed_energy > 0 ? revenues_exec[:total_revenue] / total_executed_energy : 0.0
+        total_wind_curtailed = haskey(all_results, :curtailment_energy) ? sum(all_results[:curtailment_energy]) : 0.0
+        first_clearing = minimum(collect(keys(clearing_details)))
+        last_clearing = maximum(collect(keys(clearing_details)))
+        initial_soc = clearing_details[first_clearing][:storage_soc_start]
+        last_clearing_details = clearing_details[last_clearing]
+        final_soc_end_horizon = get(
+            last_clearing_details,
+            :storage_soc_end_executed,
+            get(last_clearing_details, :storage_soc_end_window, 0.0),
+        )
+        total_storage_losses = storage[:total_charging_energy] - storage[:total_discharge_energy] - (final_soc_end_horizon - initial_soc)
+
+        # SOCIAL WELFARE (A3)
+        write_text!(sh, row, "SOCIAL WELFARE"); row += 1
+        write_row!(sh, row, Any["Metric", "Total (EUR)", "Per Day (EUR)"]); row += 1
+        write_row!(sh, row, Any["Total Demand Value", welfare[:total_demand_value], daily_metrics[:daily_welfare][:demand_value]]); row += 1
+        write_row!(sh, row, Any["Total Generation Cost", welfare[:total_generation_cost], daily_metrics[:daily_welfare][:generation_cost]]); row += 1
+        write_row!(sh, row, Any["Social Welfare", welfare[:social_welfare], daily_metrics[:daily_welfare][:social_welfare]])
+
+        # GENERAL (E3)
+        general_row = 3
+        write_text_at!(sh, general_row, 5, "GENERAL"); general_row += 1
+        write_row_at!(sh, general_row, 5, Any["Average Executed Price in EUR/MWh", avg_executed_price]); general_row += 1
+        write_row_at!(sh, general_row, 5, Any["Total Wind Curtailed (MWh)", total_wind_curtailed]); general_row += 1
+
+        row = max(row, general_row) + 2
 
         # PRODUCER REVENUES (Executed-only)
         write_text!(sh, row, "PRODUCER REVENUES (Executed-only)"); row += 1
@@ -568,13 +601,6 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
         write_row!(sh, row, Any["Total System Cost", costs[:total_cost], daily_metrics[:daily_total_cost]]); row += 1
         write_row!(sh, row, Any["Average per Clearing", costs[:total_cost] / costs[:total_clearings], ""]); row += 2
 
-        # SOCIAL WELFARE
-        write_text!(sh, row, "SOCIAL WELFARE"); row += 1
-        write_row!(sh, row, Any["Metric", "Total (EUR)", "Per Day (EUR)"]); row += 1
-        write_row!(sh, row, Any["Total Demand Value", welfare[:total_demand_value], daily_metrics[:daily_welfare][:demand_value]]); row += 1
-        write_row!(sh, row, Any["Total Generation Cost", welfare[:total_generation_cost], daily_metrics[:daily_welfare][:generation_cost]]); row += 1
-        write_row!(sh, row, Any["Social Welfare", welfare[:social_welfare], daily_metrics[:daily_welfare][:social_welfare]]); row += 2
-
         # GENERATOR PROFITS (Full Revenue - Cost)
         write_text!(sh, row, "GENERATOR PROFITS (Full Revenue - Cost)"); row += 1
         write_row!(sh, row, Any["Generator", "Total Profit (EUR)", "Profit/Day (EUR)"]); row += 1
@@ -601,7 +627,8 @@ function export_full_summary_to_excel(all_results::Dict, cfg::Dict; path::String
         write_row!(sh, row, Any["Discharge Revenue (EUR)", storage[:discharge_revenue], daily_metrics[:daily_storage][:discharge_revenue]]); row += 1
         write_row!(sh, row, Any["Charging Cost (EUR)", storage[:charging_cost], daily_metrics[:daily_storage][:charging_cost]]); row += 1
         write_row!(sh, row, Any["Net Storage Revenue (EUR)", storage[:net_revenue], daily_metrics[:daily_storage][:net_revenue]]); row += 1
-        write_row!(sh, row, Any["Average per Clearing (EUR)", storage[:net_revenue] / storage[:total_clearings], ""]); row += 2
+        write_row!(sh, row, Any["Total Losses (MWh)", total_storage_losses, total_storage_losses / sim_days]); row += 1
+        write_row!(sh, row, Any["SOC End of Horizon (MWh)", final_soc_end_horizon, ""]); row += 2
 
         # DELIVERY-HOUR AUDIT
         write_text!(sh, row, "DELIVERY-HOUR AUDIT (sum of trades vs executed)"); row += 1

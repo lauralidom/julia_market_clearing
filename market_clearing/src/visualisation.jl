@@ -16,6 +16,204 @@ function get_clearings_for_day(clearing_details::Dict, day_of_month::Int)
     return [c for c in all_clearing_indices if day_start_hour <= clearing_details[c][:current_hour] <= day_end_hour]
 end
 
+function collect_battery_diagnostics(all_results::Dict)
+    clearing_details = all_results[:clearing_details]
+    if isempty(clearing_details)
+        error("No clearing details found in all_results.")
+    end
+
+    clearing_indices = sort(collect(keys(clearing_details)))
+
+    global_hours = Int[]
+    soc_start = Float64[]
+    soc_end_executed = Float64[]
+    soc_end_window = Float64[]
+    charge_executed = Float64[]
+    discharge_executed = Float64[]
+    net_discharge_executed = Float64[]
+    avg_exec_price = Float64[]
+
+    for clearing_num in clearing_indices
+        details = clearing_details[clearing_num]
+        executed_hours = details[:executed_hours]
+        soc_path = details[:storage_soc_path]
+
+        push!(global_hours, details[:current_hour])
+        push!(soc_start, details[:storage_soc_start])
+        push!(soc_end_executed, details[:storage_soc_end_executed])
+        push!(soc_end_window, details[:storage_soc_end_window])
+
+        charge = sum(details[:charging][1:executed_hours])
+        discharge = sum(details[:discharging][1:executed_hours])
+        push!(charge_executed, charge)
+        push!(discharge_executed, discharge)
+        push!(net_discharge_executed, discharge - charge)
+        push!(avg_exec_price, mean(details[:prices][1:executed_hours]))
+
+        @assert length(soc_path) == details[:look_ahead] "SOC path length does not match look-ahead in clearing $clearing_num"
+    end
+
+    cumulative_net_absorbed = cumsum(charge_executed .- discharge_executed)
+
+    return Dict(
+        :global_hours => global_hours,
+        :soc_start => soc_start,
+        :soc_end_executed => soc_end_executed,
+        :soc_end_window => soc_end_window,
+        :charge_executed => charge_executed,
+        :discharge_executed => discharge_executed,
+        :net_discharge_executed => net_discharge_executed,
+        :avg_exec_price => avg_exec_price,
+        :cumulative_net_absorbed => cumulative_net_absorbed
+    )
+end
+
+function plot_battery_diagnostics(all_results::Dict)
+    diag = collect_battery_diagnostics(all_results)
+    E_cap = get(all_results, :storage_energy_capacity, NaN)
+    hours = diag[:global_hours]
+
+    p_soc = plot(
+        hours, diag[:soc_start],
+        label="SOC start",
+        xlabel="Global Hour",
+        ylabel="Energy (MWh)",
+        title="Battery SOC Across Clearings",
+        linewidth=2.5,
+        color=:steelblue,
+        size=(1100, 350)
+    )
+    plot!(p_soc, hours, diag[:soc_end_executed], label="SOC after executed hour(s)", linewidth=2.5, color=:darkorange)
+    plot!(p_soc, hours, diag[:soc_end_window], label="SOC at end of look-ahead", linewidth=2.0, linestyle=:dash, color=:forestgreen)
+    if isfinite(E_cap)
+        hline!(p_soc, [0.0, E_cap], label="", color=:gray60, linestyle=:dot, alpha=0.7)
+    end
+
+    p_flow = bar(
+        hours, diag[:charge_executed],
+        label="Charge",
+        xlabel="Global Hour",
+        ylabel="Executed Energy (MWh)",
+        title="Executed Battery Energy per Clearing",
+        color=:mediumpurple,
+        alpha=0.75,
+        size=(1100, 350)
+    )
+    bar!(p_flow, hours, -diag[:discharge_executed], label="Discharge", color=:goldenrod2, alpha=0.75)
+    hline!(p_flow, [0.0], label="", color=:black, linewidth=1.0)
+
+    p_cumulative = plot(
+        hours, diag[:cumulative_net_absorbed],
+        label="Cumulative (charge - discharge)",
+        xlabel="Global Hour",
+        ylabel="Energy (MWh)",
+        title="Cumulative Net Energy Absorbed by Battery",
+        linewidth=2.5,
+        color=:firebrick,
+        size=(1100, 350)
+    )
+    hline!(p_cumulative, [0.0], label="", color=:black, linewidth=1.0)
+
+    p_price = scatter(
+        diag[:avg_exec_price], diag[:net_discharge_executed],
+        xlabel="Average Executed Price (EUR/MWh)",
+        ylabel="Net Executed Discharge (MWh)",
+        title="Battery Response vs Executed Price",
+        label="One point per clearing",
+        color=:teal,
+        markersize=4,
+        alpha=0.75,
+        size=(1100, 350)
+    )
+    hline!(p_price, [0.0], label="", color=:black, linewidth=1.0)
+
+    plot(p_soc, p_flow, p_cumulative, p_price, layout=(4, 1), size=(1100, 1400))
+end
+
+function collect_demand_diagnostics(all_results::Dict)
+    clearing_details = all_results[:clearing_details]
+    if isempty(clearing_details)
+        error("No clearing details found in all_results.")
+    end
+
+    clearing_indices = sort(collect(keys(clearing_details)))
+
+    total_base_served = 0.0
+    total_flex_served = 0.0
+    total_base_available = 0.0
+    total_flex_available = 0.0
+    flex_curtailed_hours = 0
+    executed_hours_total = 0
+
+    price_bucket_labels = ["<=50", "50-100", "100-150", ">150"]
+    price_bucket_counts = Dict(label => 0 for label in price_bucket_labels)
+    price_bucket_flex = Dict(label => 0.0 for label in price_bucket_labels)
+
+    flex_served_by_hour = zeros(Float64, 24)
+    flex_available_by_hour = zeros(Float64, 24)
+    hour_counts = zeros(Int, 24)
+
+    for clearing_num in clearing_indices
+        details = clearing_details[clearing_num]
+        executed_hours = details[:executed_hours]
+        start_hour = details[:current_hour]
+
+        for h in 1:executed_hours
+            global_hour = start_hour + h - 1
+            hour_of_day = mod(global_hour - 1, 24) + 1
+
+            base_served = details[:demand_base][h]
+            flex_served = details[:demand_flex][h]
+            base_available = haskey(details, :demand_base_available) ? details[:demand_base_available][h] : base_served
+            flex_available = haskey(details, :demand_flex_available) ? details[:demand_flex_available][h] : flex_served
+            price = details[:prices][h]
+
+            total_base_served += base_served
+            total_flex_served += flex_served
+            total_base_available += base_available
+            total_flex_available += flex_available
+            executed_hours_total += 1
+
+            if flex_served + 1e-6 < flex_available
+                flex_curtailed_hours += 1
+            end
+
+            bucket =
+                price <= 50 ? "<=50" :
+                price <= 100 ? "50-100" :
+                price <= 150 ? "100-150" : ">150"
+
+            price_bucket_counts[bucket] += 1
+            price_bucket_flex[bucket] += flex_served
+
+            flex_served_by_hour[hour_of_day] += flex_served
+            flex_available_by_hour[hour_of_day] += flex_available
+            hour_counts[hour_of_day] += 1
+        end
+    end
+
+    avg_flex_served_by_hour = [hour_counts[h] > 0 ? flex_served_by_hour[h] / hour_counts[h] : 0.0 for h in 1:24]
+    avg_flex_available_by_hour = [hour_counts[h] > 0 ? flex_available_by_hour[h] / hour_counts[h] : 0.0 for h in 1:24]
+
+    avg_flex_by_bucket = Dict(
+        label => (price_bucket_counts[label] > 0 ? price_bucket_flex[label] / price_bucket_counts[label] : 0.0)
+        for label in price_bucket_labels
+    )
+
+    return Dict(
+        :total_base_served => total_base_served,
+        :total_flex_served => total_flex_served,
+        :total_base_available => total_base_available,
+        :total_flex_available => total_flex_available,
+        :executed_hours_total => executed_hours_total,
+        :flex_curtailed_hours => flex_curtailed_hours,
+        :price_bucket_counts => price_bucket_counts,
+        :avg_flex_by_bucket => avg_flex_by_bucket,
+        :avg_flex_served_by_hour => avg_flex_served_by_hour,
+        :avg_flex_available_by_hour => avg_flex_available_by_hour
+    )
+end
+
 function plot_rolling_horizon_results(all_results::Dict;
                                       day_of_month=VIS_DAY_OF_MONTH,
                                       start_clearing_of_day::Int=VIS_START_CLEARING_OF_DAY,

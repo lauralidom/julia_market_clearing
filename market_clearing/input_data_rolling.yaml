@@ -63,7 +63,7 @@ batteryStorage:
   energyCapacity: 6000 # MWh
   powerCapacity: 2000 # MW
   efficiency: 0.9
-  initialSOC: 0.2 # as fraction of energyCapacity
+  initialSOC: 0 # as fraction of energyCapacity
 
 
 # Demand parameters
