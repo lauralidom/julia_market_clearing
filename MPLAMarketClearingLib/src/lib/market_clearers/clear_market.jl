@@ -2,6 +2,8 @@ module ClearMarket
 
 using JuMP
 
+include("../data_importer.jl")
+
 include("../models/basic_model.jl")
 include("../models/rolling_model.jl")
 include("../models/rolling_model_with_ramp_rates.jl")
@@ -151,5 +153,76 @@ function Clear(data)
 	end
 end
 
+function ClearTogether(configs)
+	# TODO: revisit clearing window idea - there is an assumption here that they match
+	time_period_range = range(1,configs[1][:clearForDays]*configs[1][:timePeriodsPerDay] - configs[1][:clearingWindow]) # go from time_period 1 to the last window for which we have a full data set
+    
+	configMap = Dict{String,Any}()
+    marketSequences = Dict{String,Any}()
+    resultsets = Dict{String,Any}()
+    initializations = Dict{String,Any}()
+    for config in configs
+    	configMap[config[:strategy]] = config
+    	marketSequences[config[:strategy]] = []
+    	resultsets[config[:strategy]] = resultset = ProcessData.CreateResultSet()
+		initializations[config[:strategy]] = Dict(
+		    	:SOC => config[:batteryStorage]["initialSOC"]*config[:batteryStorage]["energyCapacity"],
+		    	:Q_gen => Dict{String,Float64}( (g, float(gConfig["initialQuantity"])) for (g, gConfig) in config[:dispatchableGenerators])
+		    )
+		# generate the sequence of markets - one entry for each t, empty if no markets to be run at that time, otherwise, a list of markets to clear at that time
+	    for t in time_period_range
+	    	push!(marketSequences[config[:strategy]] ,generateMarketSetForTimePeriod(t,config))
+	    end
+		
+    end
+
+
+    # for each market in marketSequences note the nesting here so a single time period could hold more than one market (but really probably won't in most cases) - case where it would - could be when holding a market 2 days ahead, for example
+    # a function here that can be reused across strategies. It takes: resultset, initialization, configuration, and market parameters, using the same interior functionality so we're all apples to apples.
+
+	for t in time_period_range
+		# TODO: first make the same wind noise happen - TODO: here the same system input parameters should be used
+		for (name, marketSequence) in marketSequences
+			marketsAtTime = marketSequence[t]
+			for market in marketsAtTime
+				m = FlexibleMarketModel.build(t, resultsets[name], initializations[name], configMap[name], market)
+				optimize!(m)
+				ProcessData.AddToResultSet!(resultsets[name], m, t, market[:name])
+			end
+		end
+	end
+
+	for (name, resultset) in resultsets
+		priceSets = ProcessData.GetPriceSets(resultset)
+
+		PlotPriceEvolution.plot(priceSets)
+		PlotGenerationStackRolling.plot(resultset)
+		PlotDispatchChangesForHour.plot(resultset,"Wind",125) # TODO: rename hour
+		PlotStateOfChargeRolling.plot(resultset)
+		PlotPeakGenerationAndStorageUse.plot(resultset)
+		PlotWindForecastStochasticity.plot(resultset)
+
+		PlotBaselineOutcomes.plot(resultset)
+
+		PlotTransactionVolumes.plot(resultset, resultset[1].ClearingTimePeriod, resultset[1].MarketName)
+		PlotTransactionVolumes.plot(resultset, resultset[2].ClearingTimePeriod, resultset[2].MarketName)
+		PlotTransactionVolumes.plot(resultset, resultset[3].ClearingTimePeriod, resultset[3].MarketName)
+		PlotTransactionVolumes.plot(resultset, resultset[4].ClearingTimePeriod, resultset[4].MarketName)
+		PlotTransactionVolumes.plot(resultset, resultset[5].ClearingTimePeriod, resultset[5].MarketName)
+		PlotTransactionVolumes.plot(resultset, resultset[6].ClearingTimePeriod, resultset[6].MarketName)
+		PlotTransactionVolumes.plot(resultset, resultset[7].ClearingTimePeriod, resultset[7].MarketName)
+	end
+end
+
+function ClearComparison(config_files)
+	configs = []
+	for config_file in config_files
+		config = DataImporter.load_input_data(config_file)
+		println(config)
+		push!(configs, config)
+	end
+
+	ClearMarket.ClearTogether(configs)
+end
 
 end;
