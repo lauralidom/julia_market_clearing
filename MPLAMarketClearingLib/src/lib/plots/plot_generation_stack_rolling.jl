@@ -16,10 +16,10 @@ function plot(resultset)
 
 	
     # Define consistent colors
-    gen_colors = [:steelblue, :lightgreen, :coral, :orange, :red]
+    gen_colors = [:steelblue, :lightgreen, :lightyellow, :coral, :orange, :red]
 
     # Manual stacking order: Base -> Wind -> Solar -> Peak -> Storage - maybe should do by price, swapping base next to peak? , should we verify that each type exists?
-    stack_order = ["Base", "Wind", "Solar", "Peak"]
+    stack_order = ["Base", "Shoulder", "Wind", "Solar", "Peak"]
 
     # Build matrix for areaplot (each row is a generator, each column is an time_periods)
     stack_matrix = zeros(length(stack_order), length(time_periods))

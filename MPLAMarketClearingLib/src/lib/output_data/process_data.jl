@@ -54,7 +54,7 @@ function AddToResultSet!(resultset, model, time_period, market_name)
 	cd.StorageStateOfCharge = HelperModelResults.SOCValues(model)
 
 
-	cd.Transactions = HelperModelResults.Transactions(cd,resultset, market_name)
+	cd.Transactions = HelperModelResults.Transactions(cd, resultset, market_name)
 
 	push!(resultset, cd)
 end
@@ -111,8 +111,8 @@ function LastDispatchDecisions(resultset, time_periods, collection, key)
 			end
 
 			# extract the data we need
-			if 1+time_period-result.BaseTimePeriod > 0 && 1+time_period-result.BaseTimePeriod <= length(dispatchInResult)
-				data[time_period] = dispatchInResult[1+time_period-result.BaseTimePeriod] # we only want the latest dispatch, so we allow overwriting - this will be the final dispatch
+			if time_period-result.BaseTimePeriod > 0 && time_period-result.BaseTimePeriod <= length(dispatchInResult)
+				data[time_period] = dispatchInResult[time_period-result.BaseTimePeriod] # we only want the latest dispatch, so we allow overwriting - this will be the final dispatch
 			end
 		end
 	end
@@ -242,6 +242,8 @@ end
 mutable struct SEWOutcome
 	ConsumerSurplus::Float64
 	ProducerSurplus::Float64
+	StoragePayments::Float64
+	PlayerOutcomes::Dict{String,Dict{String,Float64}}
 	# and I guess if we have network constraints, a congestion rent
 	# could also be nice to do this by generator type as well as in aggregate (also demands)
 	SEWOutcome() = new()
@@ -257,7 +259,7 @@ function resultsLEQ(resultset, time_period)
 	end
 	return leqResults
 end
-
+#=
 function SocioEconomicWelfare(resultset)
 	SEW_data = Vector{SEWOutcome}()
 
@@ -317,74 +319,154 @@ function SocioEconomicWelfare(resultset)
 	return SEW_data
 end
 
+=#
+
 function SocioEconomicWelfare_T(resultset)
 	SEW_data = Vector{SEWOutcome}()
+
+	demand_data = DemandData(resultset)
+	gen_data = GenData(resultset)
 
 	# for each result set
 	for time_period in TimePeriods(resultset)
 		relevantResults = resultsLEQ(resultset, time_period)
-
-		# 1. consider the final outcome for each producer in revenue for the time period - cost for the energy delivered in the time period and sum to make a producer surplus
 		
-		# for all previous rounds, how much has been procured (since the prior round), and at what cost - multiply these and add them up
 		revenue_for_period = 0.0
+		consumer_payments = 0.0
+		consumer_value = 0.0
+		consumer_surplus = 0.0
+		storage_payments = 0.0
+		cost_for_period = 0.0
+		player_outcomes = Dict{String,Dict{String, Float64}}()
+			
 		for prev_result in relevantResults # all previous results, including the one we're inspecting for the final adjustment
-			# for each generator, get revenue
+			
+
+			!in(time_period, prev_result.TimePeriods) && continue # if the time period we're looking for isn't in this result, skip it
 			
 			for t in prev_result.Transactions
-				if time_period == 89 && t.TimePeriod == time_period
-					println("transaction for period $(time_period) is: $t")
-				end
+				# 1. consider the final outcome for each producer in revenue for the time period - cost for the energy delivered in the time period and sum to make a producer surplus
+		
+				# for each generator, get revenue
 				for g in keys(prev_result.GenData)
+					if !haskey(player_outcomes,g)
+						player_outcomes[g] = Dict{String, Float64}()
+						player_outcomes[g]["revenue"] = 0.0
+						player_outcomes[g]["cost"] = 0.0
+						player_outcomes[g]["quantity"] = 0.0
+					end 
+					player_outcomes[g]["revenue"] += (t.TimePeriod == time_period && t.Party == g ? t.Quantity * t.Price : 0.0)
 					revenue_for_period += (t.TimePeriod == time_period && t.Party == g ? t.Quantity * t.Price : 0.0)
 				end
-			end
 
-			if time_period == 89
-				println("revenue for period $(time_period) is: $revenue_for_period")
-			end
-		end
-
-		cost_for_period = 0.0
-		# TODO: here there is an assumption that we clear every period and the period related to the clearing time is the final dispatch - this doesn't hold if we skip time periods or clear an interval that starts ahead (e.g., Day Ahead)
-		for prev_result in relevantResults
-			!in(time_period, prev_result.TimePeriods) && continue # if the time period we're looking for isn't in this result, skip it
-			cost_for_period = 0.0
-			for (g,gen_quantities) in GenData(resultset)
-				if time_period == 89
-					println("cost for gen $g in period $(time_period) is: $(gen_quantities[1+time_period-prev_result.BaseTimePeriod]) times $(prev_result.BidPrices[g][1])")
+				# 2. consider the final outcome for each demander in bid price * quantity for the time period - payments made for the time period - NOTE: given no prediction error, this will all be cleared in the first time period considered?
+				# for each generator, get revenue
+				for d in keys(prev_result.DemandData)
+					if !haskey(player_outcomes,d)
+						player_outcomes[d] = Dict{String, Float64}()
+						player_outcomes[d]["payments"] = 0.0
+						player_outcomes[d]["value"] = 0.0
+						player_outcomes[d]["quantity"] = 0.0
+					end 
+					player_outcomes[d]["payments"]  += (t.TimePeriod == time_period && t.Party == d ? t.Quantity * t.Price : 0.0)
+					consumer_payments += (t.TimePeriod == time_period && t.Party == d ? t.Quantity * t.Price : 0.0)
 				end
-				cost_for_gen = gen_quantities[1+time_period-prev_result.BaseTimePeriod]*prev_result.BidPrices[g][1]
+
+				# 3. consider the final outcome for storage in price * quantity for the time period
+			
+				# for storage get transactions for charge and discharge
+			
+				storage_payments += (t.TimePeriod == time_period && t.Party == "storage" ? t.Quantity * t.Price : 0.0)
+			end
+
+			# generator costs only for the final dispatch - thus all the 0.0 setting at the beginning
+			# note the difference between total (outside the for loop) and the player (inside) 
+			# TODO: this should be done once above and results stored
+			cost_for_period = 0.0
+			for (g,gen_quantities) in gen_data
+				player_outcomes[g]["cost"] = 0.0
+				player_outcomes[g]["quantity"] = 0.0
+				cost_for_gen = gen_quantities[time_period]*prev_result.BidPrices[g][1]
+				player_outcomes[g]["cost"] += cost_for_gen
+				player_outcomes[g]["quantity"] += gen_quantities[time_period]
 				cost_for_period += cost_for_gen
 			end
-		end
-
-		if time_period == 89
-			println("surplus for period $(time_period) is: $revenue_for_period - $cost_for_period = $(revenue_for_period - cost_for_period)")
-		end
-		producer_surplus = revenue_for_period - cost_for_period
-
-		# 2. consider the final outcome for each demander in bid price * quantity for the time period - payments made for the time period - NOTE: given no prediction error, this will all be cleared in the first time period considered?
-		consumer_surplus = 0.0
-
-		for prev_result in relevantResults # all previous results, including the one we're inspecting for the final adjustment
-			# for each generator, get revenue
-			
-			for t in prev_result.Transactions
-				for d in keys(prev_result.DemandData)
-					consumer_surplus += (t.TimePeriod == time_period && t.Party == d ? t.Quantity * t.Price : 0.0)
-				end
+			consumer_value = 0.0
+			# demand value only for the final dispatch
+			for (d,demand_quantities) in demand_data
+				player_outcomes[d]["value"] = 0.0
+				player_outcomes[d]["quantity"] = 0.0
+				value_for_demand = demand_quantities[time_period]*prev_result.BidPrices[d][1]
+				player_outcomes[d]["value"] += value_for_demand
+				player_outcomes[d]["quantity"] += demand_quantities[time_period]
+				consumer_value += value_for_demand
 			end
-
-
+			
 		end
+
+		# for all previous rounds, how much has been procured (since the prior round), and at what cost - multiply these and add them up
+			
+		producer_surplus = revenue_for_period - cost_for_period
+		consumer_surplus = consumer_value - consumer_payments
+
+		# safety check for SEW
+
+		if !isapprox(consumer_value - cost_for_period, consumer_surplus + producer_surplus + storage_payments)
+			println("mismatch: $(consumer_value - cost_for_period) != $(consumer_surplus + producer_surplus + storage_payments)")
+		end
+
 
 		outcome = SEWOutcome()
 		outcome.ConsumerSurplus = consumer_surplus
 		outcome.ProducerSurplus = producer_surplus
+		outcome.StoragePayments = storage_payments
+		outcome.PlayerOutcomes = player_outcomes
+
 		push!(SEW_data, outcome) 
 	end
 	return SEW_data
+end
+
+
+function SocioEconomicWelfareForTimeRange(resultset, timerange)
+	sewResults = SocioEconomicWelfare_T(resultset)
+	sew = 0
+	for t in timerange
+		sew += sewResults[t].ConsumerSurplus + sewResults[t].ProducerSurplus
+	end
+	return sew
+end
+
+function EconomicIndicatorsForTimeRange(resultset, timerange)
+	sewResults = SocioEconomicWelfare_T(resultset)
+	indicators = Dict{String, Float64}()
+	indicators["sew"] = 0.0
+	indicators["storage_payments"] = 0.0
+	indicators["consumer_surplus"] = 0.0
+	indicators["producer_surplus"] = 0.0
+	player_indicators = Dict{String,Dict{String,Float64}}()
+	for t in timerange
+		indicators["sew"] += sewResults[t].ConsumerSurplus + sewResults[t].ProducerSurplus
+		indicators["storage_payments"] += sewResults[t].StoragePayments
+		indicators["consumer_surplus"] += sewResults[t].ConsumerSurplus
+		indicators["producer_surplus"] += sewResults[t].ProducerSurplus
+
+		for (player,p_indicators) in sewResults[t].PlayerOutcomes
+			if !haskey(player_indicators, player)
+				player_indicators[player] = Dict{String,Float64}()
+				for (key, value) in pairs(p_indicators)
+					player_indicators[player][key] = value
+				end
+			else
+				for (key, value) in pairs(p_indicators)
+					player_indicators[player][key] += value
+				end
+			end
+
+		end
+
+	end
+	return (indicators, player_indicators)
 end
 
 # This function takes a result set and gets the latest dispatch for a generator for a particular time_period

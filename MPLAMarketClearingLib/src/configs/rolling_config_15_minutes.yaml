@@ -3,50 +3,59 @@
 strategy: rolling_with_ramps # strategy for clearing market
 nTimesteps: 96 # number of timesteps in input data
 timePeriodsPerDay: 96 # number of time periods in a day
-clearForDays: 5 # number of days to clear market for
-clearingInterval: 1 # number of time periods between market clearing/optimization rounds
+clearForDays: 7 # number of days to clear market for
+clearingInterval: 4 # number of time periods between market clearing/optimization rounds
 clearingWindow: 96 # number of time periods to consider in each round
 storageValue: 50 # experiment: value of stored MWh at end of window in objective function
-noiseLevel: .15 # tweak noise magnitude in variable generators
+noiseLevel: .1 # tweak noise magnitude in variable generators
 lookAheadDistance: 0
 marketGenerationStrategy: repeat
 
 # Generator parameters
 dispatchableGenerators:
  Base:
-  bidPrice: 30 # EUR/MWh
-  capacity: 1500 # MW
+  bidPrice: 60 # EUR/MWh
+  capacity: 1000 # MW
   rampRate: 2 # % of nominal power per minute
   initialQuantity: 1500
+  emissionFactor: 980
+
+ Shoulder:
+  bidPrice: 90 # EUR/MWh
+  capacity: 600 # MW
+  rampRate: 6 # % of nominal power per minute
+  initialQuantity: 0
+  emissionFactor: 420
 
  Peak:
-  bidPrice: 100 # EUR/MWh
-  capacity: 700 # MW
+  bidPrice: 120 # EUR/MWh
+  capacity: 400 # MW
   rampRate: 12 # % of nominal power per minute
   initialQuantity: 0
+  emissionFactor: 420
 
 variableGenerators:
   Wind:
     bidPrice: 0         # EUR/MWh
-    capacity: 1200        # MW
+    capacity: 2000        # MW
     # Low at night, strong in the afternoon/evening, length = 24
     profile: [0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.25, 0.25, 0.25, 0.25, 0.3, 0.3, 0.3, 0.3, 0.35, 0.35, 0.35, 0.35, 0.4, 0.4, 0.4, 0.4, 0.5, 0.5, 0.5, 0.5, 0.6, 0.6, 0.6, 0.6, 0.4, 0.4, 0.4, 0.4, 0.35, 0.35, 0.35, 0.35, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.7, 0.7, 0.7, 0.7, 0.8, 0.8, 0.8, 0.8, 0.85, 0.85, 0.85, 0.85, 0.8, 0.8, 0.8, 0.8, 0.75, 0.75, 0.75, 0.75, 0.7, 0.7, 0.7, 0.7, 0.6, 0.6, 0.6, 0.6, 0.5, 0.5, 0.5, 0.5]
   Solar:
     bidPrice: 0         # EUR/MWh
-    capacity: 900        # MW
+    capacity: 1000        # MW
     # Zero at night, strong in the afternoon, length = 24
     profile: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.2, 0.35, 0.35, 0.35, 0.35, 0.5, 0.5, 0.5, 0.5, 0.6, 0.6, 0.6, 0.6, 0.75, 0.75, 0.75, 0.75, 0.85, 0.85, 0.85, 0.85, 0.9, 0.9, 0.9, 0.9, 0.8, 0.8, 0.8, 0.8, 0.7, 0.7, 0.7, 0.7, 0.5, 0.5, 0.5, 0.5, 0.25, 0.25, 0.25, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     
 
 # Storage parameters
 batteryStorage:
-  energyCapacity: 2800 # MWh
-  powerCapacity: 1400 # MW
+  energyCapacity: 1000 # MWh
+  powerCapacity: 500 # MW
   efficiency: 0.9
   initialSOC: 0.5 # as fraction of energyCapacity
   endSOC: 0.5 # as fraction of energyCapacity
   endSOCRange: [0.2,0.8] # acceptable range of end SOCs as a fraction of energyCapacity - but will it always shoot for the low end? maybe the energy in storage needs to be explicitly valued in the objective function?
-  useEndSOCRange: true # toggle between a set goal and an open range of acceptable end SOCs
+  useEndSOCRange: false # toggle between a set goal and an open range of acceptable end SOCs
 
 
 # Demand parameters
@@ -57,5 +66,5 @@ demand:
       quantity: [1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500, 1600, 1600, 1600, 1600, 1800, 1800, 1800, 1800, 1900, 1900, 1900, 1900, 2300, 2300, 2300, 2300, 2500, 2500, 2500, 2500, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2300, 2300, 2300, 2300, 2200, 2200, 2200, 2200, 2100, 2100, 2100, 2100, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2200, 2400, 2400, 2400, 2400, 2500, 2500, 2500, 2500, 2600, 2600, 2600, 2600, 2500, 2500, 2500, 2500, 2200, 2200, 2200, 2200, 2100, 2100, 2100, 2100, 1900, 1900, 1900, 1900, 1700, 1700, 1700, 1700]
 
     Flex:
-      bidPrice: 50   # EUR/MWh (elastic, only if price low)
+      bidPrice: 70   # EUR/MWh (elastic, only if price low)
       quantity: [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 300, 300, 300, 300, 400, 400, 400, 400, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 400, 400, 400, 400, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300]

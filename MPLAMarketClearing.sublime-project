@@ -2,7 +2,10 @@
 	"folders":
 	[
 		{
-			"path": "."
-		}
-	]
+			"path": ".",
+		},
+		{
+			"path": "C:\\Users\\Atkin005\\OneDrive - Universiteit Utrecht\\Documents\\julia\\DATA"
+		},
+	],
 }

@@ -34,7 +34,7 @@ end
 
 function StorageChargeQuantities(m)
 	if m.ext[:parameters][:has_storage]
-	    Qch_val = value.(m.ext[:variables][:Qch])
+	    Qch_val = value.(m.ext[:variables][:Qch] * m.ext[:sets][:power_to_energy_scale])
 	else
 		return error("no storage")
 	end
@@ -42,7 +42,7 @@ end
 
 function StorageDischargeQuantities(m)
 	if m.ext[:parameters][:has_storage]
-	   	return Qdis_val = value.(m.ext[:variables][:Qdis])
+	   	return Qdis_val = value.(m.ext[:variables][:Qdis] * m.ext[:sets][:power_to_energy_scale])
 	else
 		return error("no storage")
 	end
@@ -61,7 +61,7 @@ function GenData(m)
 	IG = m.ext[:sets][:IG]
     gen_data = Dict{String, Vector{Float64}}()
     for g in IG
-        gen_data[g] = [value(m.ext[:variables][:Qg][g,t]) for t in time_periods]
+        gen_data[g] = [value(m.ext[:variables][:Qg][g,t] * m.ext[:sets][:power_to_energy_scale]) for t in time_periods]
     end
     return gen_data
 end
@@ -72,7 +72,7 @@ function DemandData(m)
 	ID = m.ext[:sets][:ID]
     dem_data = Dict{String, Vector{Float64}}()
     for d in ID
-        dem_data[d] = [value(m.ext[:variables][:Qd][d,t]) for t in time_periods]
+        dem_data[d] = [value(m.ext[:variables][:Qd][d,t] * m.ext[:sets][:power_to_energy_scale]) for t in time_periods]
     end
     return dem_data
 end
@@ -154,6 +154,37 @@ function Transactions(clearingData, resultset, market_name)
 
 				push!(transactions, transaction)
 			end
+		end
+
+	end
+
+	# for storage charging/discharging, in each time period cleared
+	for (t, Qc) in enumerate(clearingData.StorageChargeQuantities)
+		Qd = clearingData.StorageDischargeQuantities[t]
+		last_clearing_time_offset = clearingData.BaseTimePeriod + (t - 1) - last_clearing_base_time + 1 # the time when the new data was cleared plus the offset from there for this t minus the last time we were cleared plus one because we are 1 indexed
+		last_clearing_qc = has_last_result && length(last_clearing_result.StorageChargeQuantities) >= last_clearing_time_offset && last_clearing_time_offset > 0  ? last_clearing_result.StorageChargeQuantities[last_clearing_time_offset] : 0.0
+		last_clearing_qd = has_last_result && length(last_clearing_result.StorageDischargeQuantities) >= last_clearing_time_offset && last_clearing_time_offset > 0  ? last_clearing_result.StorageDischargeQuantities[last_clearing_time_offset] : 0.0
+		last_clearing_q = max(last_clearing_qc, last_clearing_qd)
+		if last_clearing_qd < last_clearing_qc
+			last_clearing_q *= -1
+		end
+		new_q = max(Qc, Qd)
+		if Qd < Qc
+			new_q *= -1
+		end
+		adjustment_q = new_q - last_clearing_q
+
+		if adjustment_q != 0.0
+			transaction = Transaction()
+			transaction.Party = "storage"
+			transaction.Quantity = adjustment_q
+			transaction.Price = prices[t]
+			transaction.TimePeriod = clearingData.BaseTimePeriod + t - 1 # -1 because 1 indexed and 1 is the current period
+			transaction.ClearingTimePeriod = clearingData.ClearingTimePeriod
+			transaction.PartyType = PARTY_STORAGE
+			transaction.MarketName = market_name
+
+			push!(transactions, transaction)
 		end
 
 	end

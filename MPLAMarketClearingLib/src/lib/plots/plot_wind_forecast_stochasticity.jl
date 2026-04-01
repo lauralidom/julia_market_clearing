@@ -7,7 +7,7 @@ using Statistics
 include("../output_data/process_data.jl")
 
 function plot(resultset)
-	plot_solar = false
+	plot_solar = true
 	# below copied from Laura and modified - TA
 
     # Wind generation evolution across clearings

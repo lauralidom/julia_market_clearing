@@ -29,6 +29,8 @@ function define_sets!(m::Model, time_period::Int, resultset, initialization::Dic
     marketStart = time_period + market[:lookAheadDistance] 
     marketEnd = marketStart + market[:clearingWindow]
 
+    m.ext[:sets][:power_to_energy_scale] = 24 / data[:timePeriodsPerDay] # hours per day / time periods per day = time periods per hour
+
     m.ext[:sets][:CH] = marketStart : marketEnd   # periods for this clearing window
 
     # generators IG = list of all generator names (dispatchable + variable)
@@ -98,12 +100,6 @@ function process_time_series_data!(m::Model, time_period::Int, resultset, initia
             Pr_gen[(g,t)] = P
             Q_gen[(g,t)]  = Q * af         # available capacity = Q * profile[t]
             Q_prev_gen[(g,t)] = ProcessData.GenPreviousDispatchDataForTimePeriod(resultset, g, t)
-        end
-
-        # TODO: a new approach to noise
-        if haskey(data,:noiseLevel) && data[:noiseLevel] > 0
-            noise_std = float(data[:noiseLevel]) 
-            HelperInputData.add_noise!(Q_gen, g, Q, noise_std, CH[1], CH[length(CH)])
         end
     end
 
@@ -230,7 +226,6 @@ function build_market_clearing!(m::Model, time_period::Int, resultset, initializ
     # OBJECTIVE: maximise welfare (value of demand minus generation cost)
     # sum_d,t P_dem(d) * Qd[d,t]  -  sum_g,t P_gen(g,t) * Qg[g,t]
     m.ext[:objective] = @objective(m, Max,
-        (m.ext[:parameters][:storage_value] * SOC[CH[length(CH)]]) + # note this line add a valuation to the stored energy at the end of the window - just a preset parameter for now
         sum(Pr_dem[(String(d),t)] * Qd[d,t] for d in ID, t in CH) -
         sum(Pr_gen[(String(g),t)] * Qg[g,t] for g in IG, t in CH)
     )
@@ -287,11 +282,11 @@ function build_market_clearing!(m::Model, time_period::Int, resultset, initializ
         # State of charge dynamics: SOC[t] = SOC[t-1] + η*Qch[t] - Qdis[t]/η
         # For first hour t=start_at_period, use initial SOC
         #  feed forward the SOC result from the previous round
-        @constraint(m, SOC[start_at_period] == SOC_init + η * Qch[start_at_period] - Qdis[start_at_period] / η)
+        @constraint(m, SOC[start_at_period] == SOC_init + η * (Qch[start_at_period] * m.ext[:sets][:power_to_energy_scale]) - (Qdis[start_at_period] * m.ext[:sets][:power_to_energy_scale]) / η)
         
         # interperiod constraints for hours 2+
         for t in range(start_at_period + 1,(start_at_period -1)+length(CH))
-            @constraint(m, SOC[t] == SOC[t-1] + η * Qch[t] - Qdis[t] / η)
+            @constraint(m, SOC[t] == SOC[t-1] + η * (Qch[t]* m.ext[:sets][:power_to_energy_scale]) - (Qdis[t] * m.ext[:sets][:power_to_energy_scale]) / η)
         end
         
         # Cyclic constraint: end at a specific SOC or within a range
