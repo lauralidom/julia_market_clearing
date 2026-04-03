@@ -6,7 +6,7 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-function plot(resultset)
+function plot(resultset, name, test_id)
 
 	time_periods = ProcessData.TimePeriods(resultset)
 	gen_data = ProcessData.GenData(resultset)
@@ -89,6 +89,7 @@ function plot(resultset)
         label="Demand + Charging", color=:black, lw=3, ls=:dash)
     
     display(p3)
+    savefig(p3, "../DATA/$(test_id)/peak_and_storage_$(name).png")
     return p3 
 end
 

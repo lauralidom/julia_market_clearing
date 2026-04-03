@@ -1,6 +1,6 @@
 module ProcessData
 
-using Dates, JuMP, MathOptInterface
+using Dates, JuMP, MathOptInterface, DataFrames
 
 
 include("../helpers/helper_model_results.jl")
@@ -503,6 +503,25 @@ function Transactions(resultset)
 		append!(all_transactions, result.Transactions)
 	end
 	return all_transactions
+end
+
+#= TRANSACTION
+	MarketName::String
+	Party::String
+	Quantity::Float64
+	Price::Float64
+	TimePeriod::Int
+	ClearingTimePeriod::Int
+	PartyType::PartyTypeEnum
+=#
+
+function TransactionDataFrame(resultset)
+	transactions = Transactions(resultset)
+	df = DataFrame(MarketName=String[], Party=String[], Quantity=Float64[], Price=Float64[], TimePeriod=Int[], ClearingTimePeriod=Int[], PartyType=String[])
+	for t in transactions
+		push!(df, [t.MarketName, t.Party, t.Quantity, t.Price, t.TimePeriod, t.ClearingTimePeriod, string(Symbol(t.PartyType))])
+	end
+	return df
 end
 
 

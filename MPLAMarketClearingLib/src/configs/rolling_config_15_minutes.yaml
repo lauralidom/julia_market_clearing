@@ -4,10 +4,10 @@ strategy: rolling_with_ramps # strategy for clearing market
 nTimesteps: 96 # number of timesteps in input data
 timePeriodsPerDay: 96 # number of time periods in a day
 clearForDays: 7 # number of days to clear market for
-clearingInterval: 4 # number of time periods between market clearing/optimization rounds
-clearingWindow: 96 # number of time periods to consider in each round
+clearingInterval: 8 # number of time periods between market clearing/optimization rounds
+clearingWindow: 144 # number of time periods to consider in each round 96 - 1 day, 144 - 1.5 days, 192 - 2 days
 storageValue: 50 # experiment: value of stored MWh at end of window in objective function
-noiseLevel: .1 # tweak noise magnitude in variable generators
+noiseLevel: .15 # tweak noise magnitude in variable generators
 lookAheadDistance: 0
 marketGenerationStrategy: repeat
 
@@ -49,8 +49,8 @@ variableGenerators:
 
 # Storage parameters
 batteryStorage:
-  energyCapacity: 1000 # MWh
-  powerCapacity: 500 # MW
+  energyCapacity: 2000 # MWh
+  powerCapacity: 1000 # MW
   efficiency: 0.9
   initialSOC: 0.5 # as fraction of energyCapacity
   endSOC: 0.5 # as fraction of energyCapacity

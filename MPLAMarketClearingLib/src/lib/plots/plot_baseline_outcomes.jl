@@ -6,7 +6,7 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-function plot(resultset)
+function plot(resultset, name, test_id)
 
     time_periods = ProcessData.TimePeriods(resultset)
 
@@ -23,8 +23,8 @@ function plot(resultset)
     for (i, sew_outcome) in enumerate(sew)
         stack_matrix[1, i] = sew_outcome.ProducerSurplus
         stack_matrix[2, i] = sew_outcome.ConsumerSurplus
-        stack_matrix[3, i] = max(sew_outcome.StoragePayments,0)
         stack_matrix[3, i] = min(sew_outcome.StoragePayments,0)
+        stack_matrix[4, i] = max(sew_outcome.StoragePayments,0)
     end
 
     # Create stacked area plot
@@ -47,7 +47,28 @@ function plot(resultset)
         end
     end
 
+    p4  = Plots.plot(xlabel="Time Period", ylabel="EUR",
+            title="Storage Only Economic Indicators", size=(1200,1200),
+            legend=:topright)
+
+    for i in 3:4
+        if i == 3
+            Plots.plot!(p4, time_periods, stack_matrix[i, :],
+                fillrange=0, label=stack_order[i], 
+                color=colors[i], alpha=0.4, linewidth=0)
+        else
+            cumsum_prev = vec(sum(stack_matrix[3:i-1, :], dims=1))
+            cumsum_curr = vec(sum(stack_matrix[3:i, :], dims=1))
+            Plots.plot!(p4, time_periods, cumsum_curr,
+                fillrange=cumsum_prev, label=stack_order[i],
+                color=colors[i], alpha=0.4, linewidth=0)
+        end
+    end
+
     display(p3)
+    savefig(p3, "../DATA/$(test_id)/economic_indicators_$(name).png")
+    display(p4)
+    savefig(p4, "../DATA/$(test_id)/storage_economic_indicators_$(name).png")
     return p3 
 end
 

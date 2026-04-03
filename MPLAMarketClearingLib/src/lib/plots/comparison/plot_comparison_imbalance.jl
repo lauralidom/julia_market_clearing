@@ -10,7 +10,7 @@ include("../../output_data/process_data.jl")
 
 
 # Note: perhaps it would be best to make a helper function for getting the final dispatch, and realized energy production from ST market sequence?
-function plot(resultsets, variableGenLastForecasts, timerange, test_id)
+function plot(resultsets, variableGenRealized, timerange, test_id)
     # for now compare just the variable generator last dispatched quantity vs the variable generator last forecast value (after the last forecast, the energy production is assumed to be realized)
     realized_q = Dict{String,Vector{Float64}}()
     dispatched_q = Dict{String,Dict{String,Vector{Float64}}}()
@@ -19,8 +19,8 @@ function plot(resultsets, variableGenLastForecasts, timerange, test_id)
     dispatched_q_total = Dict{String,Vector{Float64}}()
     imbalance_q_total = Dict{String,Vector{Float64}}()
 
-    for (gName, gData) in variableGenLastForecasts
-        realized_q[gName] = gData["profile"] .* (gData["capacity"] * .25) # note hardcoded power to energy here - TODO: pass this parameter in
+    for (gName, gData) in variableGenRealized
+        realized_q[gName] = gData # note hardcoded power to energy here - TODO: pass this parameter in
         
     end
 
@@ -32,7 +32,7 @@ function plot(resultsets, variableGenLastForecasts, timerange, test_id)
         dispatched_q_total[name] = zeros(realized_length)
         imbalance_q_total[name] = zeros(realized_length)
         
-        for (gName, gData) in variableGenLastForecasts # ensure we have matching dispatchable generators
+        for (gName, gData) in variableGenRealized # ensure we have matching dispatchable generators
 
             dispatched_q[name][gName] = gen_dispatch_data[gName]
             dispatched_q_total[name] .+= gen_dispatch_data[gName][1:realized_length]
@@ -48,7 +48,7 @@ function plot(resultsets, variableGenLastForecasts, timerange, test_id)
 
 
     realized_q_total = zeros(length(realized_q["Wind"]))
-    for (gName, gData) in variableGenLastForecasts
+    for (gName, gData) in variableGenRealized
         realized_q_total .+= realized_q[gName]
         realized_q[gName] = realized_q[gName][timerange]    # slice to match incoming time range
     end
@@ -91,6 +91,8 @@ function plot(resultsets, variableGenLastForecasts, timerange, test_id)
 
     display(p3)
     display(p4)
+    savefig(p3, "../DATA/$(test_id)/realized_v_dispatched.png")
+    savefig(p4, "../DATA/$(test_id)/imbalance.png")
 
     imbalance_df = DataFrame(Name=String[],PositiveImbalance=Float64[],NegativeImbalance=Float64[], AbsoluteImbalance=Float64[])
     for (name, imbalance_q_t) in imbalance_q_total
@@ -99,7 +101,7 @@ function plot(resultsets, variableGenLastForecasts, timerange, test_id)
     println(imbalance_df)
 
 
-    XLSX.writetable("../DATA/test_imbalance_$(test_id).xlsx", "sheet1" => imbalance_df)
+    XLSX.writetable("../DATA/$(test_id)/imbalance.xlsx", "sheet1" => imbalance_df)
 end
 
 

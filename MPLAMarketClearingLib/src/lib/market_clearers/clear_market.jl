@@ -227,20 +227,27 @@ function ClearTogether(configs, test_id)
 		# println("finish clearing ", t)
 	end
 
+	variableGenRealized = Dict{String, Vector{Float64}}()
+	for (gName, gData) in first_config[:variableGenerators]
+		variableGenRealized[gName] = variableGeneratorProfiles[gName] .*= gData["capacity"] * (24/first_config[:timePeriodsPerDay])
+	end
+
 	plots = [PlotBaselineOutcomes, PlotStateOfChargeRolling, PlotPeakGenerationAndStorageUse, PlotWindForecastStochasticity, PlotGenerationStackRolling]
 
 	for plot in plots
 		for (name, resultset) in resultsets
-			plot.plot(resultset)
+			plot.plot(resultset, name, test_id)
 		end
 	end
 
-	PlotComparisonImbalance.plot(resultsets, configMap[first_config[:strategy]][:variableGenerators], range(first_config[:timePeriodsPerDay]*2,first_config[:timePeriodsPerDay]*(first_config[:clearForDays] - 1)), test_id)
-	
 
+	PlotComparisonImbalance.plot(resultsets, variableGenRealized, range(first_config[:timePeriodsPerDay]*2,first_config[:timePeriodsPerDay]*(first_config[:clearForDays] - 1)), test_id)
+	
 	PlotComparisonBaselineOutcomes.plot(resultsets, configMap, range(first_config[:timePeriodsPerDay]*2,first_config[:timePeriodsPerDay]*(first_config[:clearForDays] - 1)), test_id)
 
-	#TODO: table output for economic indicators for a single MTU
+	return (resultsets, variableGenRealized, configMap)
+
+	# table output for economic indicators for a single MTU
 	# PlotComparisonTableForMTU.plot(resultsets, configMap[first_config[:strategy]][:variableGenerators], 235)
 end
 
@@ -251,7 +258,24 @@ function ClearComparison(config_files, test_id)
 		push!(configs, config)
 	end
 
-	ClearMarket.ClearTogether(configs, test_id)
+	return ClearMarket.ClearTogether(configs, test_id)
+end
+
+function ClearComparisonWithVRESFlexScale(config_files, vres_scale, flex_scale, test_id)
+	configs = []
+	for config_file in config_files
+		config = DataImporter.load_input_data(config_file)
+		for (gName, gConfig) in config[:variableGenerators]
+			gConfig["capacity"] = gConfig["capacity"] * vres_scale
+		end
+		config[:batteryStorage]["energyCapacity"] =  config[:batteryStorage]["energyCapacity"] * flex_scale
+		config[:batteryStorage]["powerCapacity"] =  config[:batteryStorage]["powerCapacity"] * flex_scale
+		push!(configs, config)
+	end
+
+	return ClearMarket.ClearTogether(configs, test_id)
+
+
 end
 
 end;

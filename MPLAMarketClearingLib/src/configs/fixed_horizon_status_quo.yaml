@@ -7,7 +7,7 @@ clearForDays: 7 # number of days to clear market for
 clearingInterval: 1 # number of time periods between market clearing/optimization rounds
 clearingWindow: 96 # number of time periods to consider in each round
 storageValue: 50 # experiment: value of stored MWh at end of window in objective function
-noiseLevel: .1 # tweak noise magnitude in variable generators
+noiseLevel: .15 # tweak noise magnitude in variable generators
 marketGenerationStrategy: explicit
 
 # It would be nice to be less heuristic about the fixed MCP - this approach seems susceptible to data entry error. I could also verify before running the market simulation.
@@ -71,8 +71,8 @@ variableGenerators:
 
 # Storage parameters
 batteryStorage:
-  energyCapacity: 1000 # MWh
-  powerCapacity: 500 # MW
+  energyCapacity: 2000 # MWh
+  powerCapacity: 1000 # MW
   efficiency: 0.9
   initialSOC: 0.5 # as fraction of energyCapacity
   endSOC: 0.5 # as fraction of energyCapacity

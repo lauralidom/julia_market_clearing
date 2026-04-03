@@ -6,7 +6,7 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-function plot(resultset)
+function plot(resultset, name, test_id)
 
 	time_periods = ProcessData.TimePeriods(resultset)
 	gen_data = ProcessData.GenData(resultset)
@@ -16,10 +16,10 @@ function plot(resultset)
 
 	
     # Define consistent colors
-    gen_colors = [:steelblue, :lightgreen, :lightyellow, :coral, :orange, :red]
+    gen_colors = [:steelblue, :lightgreen, :red, :lightyellow, :coral, :orange]
 
     # Manual stacking order: Base -> Wind -> Solar -> Peak -> Storage - maybe should do by price, swapping base next to peak? , should we verify that each type exists?
-    stack_order = ["Base", "Shoulder", "Wind", "Solar", "Peak"]
+    stack_order = ["Base", "Shoulder", "Peak", "Wind", "Solar"]
 
     # Build matrix for areaplot (each row is a generator, each column is an time_periods)
     stack_matrix = zeros(length(stack_order), length(time_periods))
@@ -69,6 +69,7 @@ function plot(resultset)
         label="Demand + Charging", color=:black, lw=3, ls=:dash)
     
     display(p3)
+    savefig(p3, "../DATA/$(test_id)/generation_stack_$(name).png")
     return p3 
 end
 

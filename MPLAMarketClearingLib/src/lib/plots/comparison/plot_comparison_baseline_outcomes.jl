@@ -29,8 +29,8 @@ function plot(resultsets, configMap, timerange, test_id)
         push!(names,name)
     end
 
-    println("SEW comparison: $(names[1]) / $(names[2]) $(indicator_set[names[1]]["sew"]/indicator_set[names[2]]["sew"])")
-    println("SEW with storage comparison: $(names[1]) / $(names[2]) $((indicator_set[names[1]]["sew"] + indicator_set[names[1]]["storage_payments"])/(indicator_set[names[2]]["sew"] + indicator_set[names[1]]["storage_payments"]))")
+    # println("SEW comparison: $(names[1]) / $(names[2]) $(indicator_set[names[1]]["sew"]/indicator_set[names[2]]["sew"])")
+    # println("SEW with storage comparison: $(names[1]) / $(names[2]) $((indicator_set[names[1]]["sew"] + indicator_set[names[1]]["storage_payments"])/(indicator_set[names[2]]["sew"] + indicator_set[names[1]]["storage_payments"]))")
 
     emissionsMap = Dict{String,Float64}()
 
@@ -57,13 +57,21 @@ function plot(resultsets, configMap, timerange, test_id)
         end
     end
 
+    sort!(overall_indicators_df,[:Name])
     sort!(player_indicator_df,[:Player,:Name])
     println(overall_indicators_df)
     println(player_indicator_df)
 
-    XLSX.writetable("../DATA/test_overall_$(test_id).xlsx", "sheet1" => overall_indicators_df)
+    XLSX.writetable("../DATA/$(test_id)/overall.xlsx", "sheet1" => overall_indicators_df)
 
-    XLSX.writetable("../DATA/test_player_$(test_id).xlsx", "sheet1" => player_indicator_df)
+    XLSX.writetable("../DATA/$(test_id)/player.xlsx", "sheet1" => player_indicator_df)
+
+    for (name, resultset) in resultsets
+           
+        transaction_df = ProcessData.TransactionDataFrame(resultset)
+        XLSX.writetable("../DATA/$(test_id)/transactions_$(name).xlsx", "sheet1" => transaction_df)
+    end
+
 end
 
 

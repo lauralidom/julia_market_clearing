@@ -6,7 +6,7 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-function plot(resultset)
+function plot(resultset, name, test_id)
 	plot_solar = true
 	# below copied from Laura and modified - TA
 
@@ -52,6 +52,8 @@ function plot(resultset)
 	    end 
     end
     display(p3)
+    savefig(p3, "../DATA/$(test_id)/wind_forecast_$(name).png")
+    return p3
 end
 
 end;

@@ -6,7 +6,7 @@ using Statistics
 
 include("../output_data/process_data.jl")
 
-function plot(resultset)
+function plot(resultset, name, test_id)
 
        time_periods = ProcessData.TimePeriods(resultset)
        SOC_val = ProcessData.StorageStateOfChargeOutcomes(resultset)
@@ -18,6 +18,7 @@ function plot(resultset)
        # hline!(p2, [m.ext[:parameters][:storage_energy_capacity]], label="Max Capacity", ls=:dash, color=:red) # nice to have but relies on model for now
 
     display(p2)
+    savefig(p2, "../DATA/$(test_id)/soc_$(name).png")
     return p2
 end
 
