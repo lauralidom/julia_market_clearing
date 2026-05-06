@@ -42,11 +42,17 @@ function apply_simulation_month!(cfg::Dict)
         error("rolling_horizon.simulation_month must be between 1 and 12")
     end
 
+    simulation_start_hour = Int(get(rh, "simulation_start_hour", 0))
+    if simulation_start_hour < 0 || simulation_start_hour > 23
+        error("rolling_horizon.simulation_start_hour must be between 0 and 23")
+    end
+
     # Dataset is fixed to 2025, so only month is configurable.
     month_start = Date(2025, sim_month, 1)
-    month_end = lastdayofmonth(month_start)
-    start_dt = DateTime(month_start)
-    end_dt = DateTime(month_end) + Hour(23)
+    start_dt = DateTime(month_start) + Hour(simulation_start_hour)
+
+    sim_days = Int(get(rh, "simulation_days", day(lastdayofmonth(month_start))))
+    end_dt = start_dt + Hour(sim_days * 24 - 1)
 
     iso_fmt = dateformat"yyyy-mm-dd HH:MM:SS"
     euro_fmt = dateformat"dd/mm/yyyy HH:MM"
@@ -392,7 +398,7 @@ const phi = 0.8  # AR(1) autocorrelation coefficient for wind forecast errors, 0
 function add_wind_forecast_noise!(Q_gen_window::Dict,cfg::Dict,max_noise_std::Float64,
 IG::Vector,window_length::Int,forecast_error_per_hour::Dict{Int, Float64},
 window_start_hour::Int)
-    if max_noise_std == 0.0
+    if max_noise_std == 0.0 || window_length <= 1
         return
     end
 
@@ -476,6 +482,20 @@ function prepare_Q_prev_for_next_window(prev_q_financial::Dict, window_length::I
     end
     
     return Q_prev
+end
+
+function calculate_comparable_delivery_hours(cfg::Dict)
+    rh = cfg["rolling_horizon"]
+    sim_days = Int(rh["simulation_days"])
+    reclear_freq = Int(rh["reclear_frequency"])
+    max_look_ahead = Int(rh["look_ahead_window"])
+    min_look_ahead = Int(get(rh, "fixed_horizon_min_window", max_look_ahead))
+
+    total_possible_clearings = div(sim_days * 24, reclear_freq)
+    horizon_span = max_look_ahead - min_look_ahead
+    cycle_clearings = div(horizon_span, reclear_freq) + 1
+    last_full_reset_clearing = 1 + cycle_clearings * div(total_possible_clearings - 1, cycle_clearings)
+    return last_full_reset_clearing * reclear_freq
 end
 
 # 7: Process Parameters for storage and ramping

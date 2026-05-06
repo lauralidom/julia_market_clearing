@@ -1,8 +1,10 @@
 # Rolling horizon parameters
 rolling_horizon:
-  simulation_month: 1             # 1=Jan ... 12=Dec
-  simulation_days: 30             # auto-overwritten from simulation_month (year fixed to 2025)
-  look_ahead_window: 24           # hours to optimise ahead
+  simulation_month: 5             # 1=Jan ... 12=Dec
+  simulation_days: 30             # 
+  simulation_start_hour: 12       # align first delivered hour to 12:00 for market-timeline comparability
+  look_ahead_window: 36           # hours to optimise ahead
+  fixed_horizon_min_window: 13    # fixed horizon shrinks until 13h, then resets to 36h
   reclear_frequency: 1            # reclear every N hours
   gate_closure: 1                 # hours locked from gate closure (no adjustment allowed)
   forecast_noise_std: 0.20        # standard deviation of wind forecast noise (0 = no noise)

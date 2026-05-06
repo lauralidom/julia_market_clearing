@@ -130,6 +130,132 @@ function plot_battery_diagnostics(all_results::Dict)
     plot(p_soc, p_flow, p_cumulative, p_price, layout=(4, 1), size=(1100, 1400))
 end
 
+function collect_price_storage_timing_diagnostics(all_results::Dict)
+    clearing_details = all_results[:clearing_details]
+    if isempty(clearing_details)
+        error("No clearing details found in all_results.")
+    end
+
+    avg_price_by_hour = zeros(Float64, 24)
+    net_discharge_by_hour = zeros(Float64, 24)
+    hour_counts = zeros(Int, 24)
+
+    for clearing_num in sort(collect(keys(clearing_details)))
+        details = clearing_details[clearing_num]
+        executed_hours = details[:executed_hours]
+        start_hour = details[:current_hour]
+
+        for h in 1:executed_hours
+            global_hour = start_hour + h - 1
+            hour_of_day = mod(global_hour - 1, 24) + 1
+            price = details[:prices][h]
+            net_discharge = details[:discharging][h] - details[:charging][h]
+
+            avg_price_by_hour[hour_of_day] += price
+            net_discharge_by_hour[hour_of_day] += net_discharge
+            hour_counts[hour_of_day] += 1
+        end
+    end
+
+    return Dict(
+        :avg_price_by_hour => [hour_counts[h] > 0 ? avg_price_by_hour[h] / hour_counts[h] : 0.0 for h in 1:24],
+        :avg_net_discharge_by_hour => [hour_counts[h] > 0 ? net_discharge_by_hour[h] / hour_counts[h] : 0.0 for h in 1:24],
+        :hour_counts => hour_counts
+    )
+end
+
+function plot_price_storage_timing_diagnostics(all_results::Dict)
+    diag = collect_price_storage_timing_diagnostics(all_results)
+    hours = 1:24
+
+    p_price = plot(
+        hours, diag[:avg_price_by_hour],
+        label="Avg Executed Price",
+        xlabel="Hour of Day",
+        ylabel="EUR/MWh",
+        title="Average Executed Price by Hour of Day",
+        linewidth=3,
+        color=:steelblue,
+        marker=:circle,
+        markersize=4,
+        size=(1000, 350)
+    )
+    xlims!(p_price, 1, 24)
+
+    p_storage = bar(
+        hours, diag[:avg_net_discharge_by_hour],
+        label="Avg Net Discharge",
+        xlabel="Hour of Day",
+        ylabel="MWh",
+        title="Average Battery Net Discharge by Hour of Day",
+        color=:darkorange,
+        alpha=0.8,
+        size=(1000, 350)
+    )
+    hline!(p_storage, [0.0], label="", color=:black, linewidth=1.0)
+    xlims!(p_storage, 1, 24)
+
+    plot(p_price, p_storage, layout=(2, 1), size=(1000, 800))
+end
+
+function collect_storage_value_diagnostics(all_results::Dict)
+    clearing_details = all_results[:clearing_details]
+    if isempty(clearing_details)
+        error("No clearing details found in all_results.")
+    end
+
+    marginal_value_by_hour = zeros(Float64, 24)
+    hour_counts = zeros(Int, 24)
+    marginal_values = Float64[]
+
+    for clearing_num in sort(collect(keys(clearing_details)))
+        details = clearing_details[clearing_num]
+        hour_of_day = mod(details[:current_hour] - 1, 24) + 1
+        marginal_value = -details[:storage_initial_soc_dual]
+        marginal_value_by_hour[hour_of_day] += marginal_value
+        hour_counts[hour_of_day] += 1
+        push!(marginal_values, marginal_value)
+    end
+
+    return Dict(
+        :avg_marginal_value_by_hour => [hour_counts[h] > 0 ? marginal_value_by_hour[h] / hour_counts[h] : 0.0 for h in 1:24],
+        :all_marginal_values => marginal_values,
+        :hour_counts => hour_counts
+    )
+end
+
+function print_storage_value_diagnostics(all_results::Dict)
+    diag = collect_storage_value_diagnostics(all_results)
+    values = diag[:all_marginal_values]
+
+    println()
+    println("STORAGE VALUE DIAGNOSTICS")
+    println("-"^80)
+    println("Reported value is the marginal welfare value of 1 extra MWh of initial battery SOC in a clearing.")
+    println("Average marginal value of initial SOC: $(round(mean(values); digits=2)) EUR/MWh")
+    println("Min marginal value of initial SOC: $(round(minimum(values); digits=2)) EUR/MWh")
+    println("Max marginal value of initial SOC: $(round(maximum(values); digits=2)) EUR/MWh")
+    println("-"^80)
+end
+
+function plot_storage_value_diagnostics(all_results::Dict)
+    diag = collect_storage_value_diagnostics(all_results)
+    hours = 1:24
+
+    plot(
+        hours, diag[:avg_marginal_value_by_hour],
+        label="Avg marginal value of initial SOC",
+        xlabel="Hour of Day",
+        ylabel="EUR/MWh",
+        title="Average Marginal Value of Initial Battery SOC by Hour of Day",
+        linewidth=3,
+        color=:purple4,
+        marker=:circle,
+        markersize=4,
+        size=(1000, 350)
+    )
+end
+
 function collect_demand_diagnostics(all_results::Dict)
     clearing_details = all_results[:clearing_details]
     if isempty(clearing_details)

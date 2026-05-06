@@ -27,13 +27,19 @@ look_ahead = Int(rh_params["look_ahead_window"])
 reclear_freq = Int(rh_params["reclear_frequency"])
 gate_closure = Int(rh_params["gate_closure"])
 forecast_noise = float(rh_params["forecast_noise_std"])
+simulation_start_hour = Int(get(rh_params, "simulation_start_hour", 0))
+
+@assert look_ahead >= reclear_freq "look_ahead_window must be at least reclear_frequency"
+@assert look_ahead >= 1 "look_ahead_window must be positive"
 
 
-# Add 1 hour for prep hour (hour 0)
-total_hours = sim_days * 24 + 1
+# Stop at the last clearing where fixed and rolling both still have the full horizon.
+simulated_delivery_hours = calculate_comparable_delivery_hours(cfg)
+total_hours = simulated_delivery_hours + look_ahead
 
 println("Rolling Horizon Market Clearing Simulation")
-println("Simulation: $sim_days days + 1 prep hour | Look-ahead: $look_ahead hours | Reclear frequency: every $reclear_freq hour(s)")
+println("Simulation: $sim_days days from $(lpad(simulation_start_hour, 2, '0')):00 | Look-ahead: $look_ahead hours | Reclear frequency: every $reclear_freq hour(s)")
+println("Comparable delivered hours: $simulated_delivery_hours")
 println("Gate closure: $gate_closure hour(s) | Peak+Wind flexible, Base+Mid+Solar locked during gate closure")
 println()
 
@@ -111,7 +117,8 @@ forecast_error_per_hour = Dict{Int, Float64}()
 
 for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     clearing_count += 1
-    current_hour = start_hour                                             
+    current_hour = start_hour
+    actual_executed_hours = min(reclear_freq, look_ahead, simulated_delivery_hours - current_hour + 1)
     
     # Print clearing header (verbose for first 5, then every 50th)
     if clearing_count <= 5 || clearing_count % 50 == 0
@@ -189,7 +196,7 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     var_gen_names = Set{String}(String(gname) for (gname, _) in cfg["variableGenerators"])
     for g in IG
         if g in var_gen_names
-            for h in 1:reclear_freq
+            for h in 1:actual_executed_hours
                 global_hour = current_hour + (h - 1)
                 # Use the true value from the full timeseries (no noise)
                 Q_gen_window[(g, h)] = Q_gen_full[(g, global_hour)]
@@ -274,6 +281,8 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     
     prices_window = [λ[h] for h in 1:look_ahead]
     
+    storage_initial_soc_dual = dual(m.ext[:constraints][:soc_h1])
+
     # Extract battery variables for storage
     Qch_val = value.(m.ext[:variables][:Qch])
     Qdis_val = value.(m.ext[:variables][:Qdis])
@@ -287,7 +296,7 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     # Store detailed data for this clearing (including demand and storage)
     all_results[:clearing_details][clearing_count] = Dict(
         :current_hour => current_hour,
-        :executed_hours => reclear_freq,
+        :executed_hours => actual_executed_hours,
         :look_ahead => look_ahead,
         :Q_prev => Q_prev,
         :q => q_val,
@@ -298,8 +307,9 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
         :charging => [Qch_val[h] for h in 1:look_ahead],
         :discharging => [Qdis_val[h] for h in 1:look_ahead],
         :storage_soc_start => m.ext[:parameters][:storage_initial_soc],
+        :storage_initial_soc_dual => storage_initial_soc_dual,
         :storage_soc_path => [SOC_val[h] for h in 1:look_ahead],
-        :storage_soc_end_executed => SOC_val[reclear_freq],
+        :storage_soc_end_executed => SOC_val[actual_executed_hours],
         :storage_soc_end_window => SOC_val[look_ahead],
         :wind_available_h1 => Q_gen_window[("Wind", 1)],
         :wind_executed_h1 => g_planned_val["Wind", 1],
@@ -322,14 +332,14 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     # Extract dispatch at the end of executed hours for ramping constraint continuity
     # The dispatch at hour reclear_freq becomes the initial dispatch for next clearing's hour 1
     for g in IG
-        prev_g_dispatch[g] = g_planned_val[g, reclear_freq]
+        prev_g_dispatch[g] = g_planned_val[g, actual_executed_hours]
     end
 
     
     # Storage state continuity: pass executed hours SOC to next clearing
     # After reclear_freq hours, we need SOC at the end of those executed hours
     SOC_val = value.(m.ext[:variables][:SOC])
-    storage_soc_carryover = SOC_val[reclear_freq]  # SOC after executing reclear_freq hours
+    storage_soc_carryover = SOC_val[actual_executed_hours]  # SOC after executing delivered hours
     
     # KIND OF COMPLICATED LOGIC FOR PRINTING THE PRICE SETTER
     # Print diagnostics for hour 1 and final executed hour (h=reclear_freq)
@@ -380,6 +390,20 @@ p = plot_rolling_horizon_results(all_results)
 savefig(p, "rolling_horizon_results.png")
 println("Plot saved to: rolling_horizon_results.png")
 display(p)
+println()
+
+print_battery_diagnostics(all_results)
+pt = plot_price_storage_timing_diagnostics(all_results)
+savefig(pt, "rolling_horizon_price_storage_timing.png")
+println("Price/storage timing plot saved to: rolling_horizon_price_storage_timing.png")
+display(pt)
+println()
+
+print_storage_value_diagnostics(all_results)
+ps = plot_storage_value_diagnostics(all_results)
+savefig(ps, "rolling_horizon_storage_value.png")
+println("Storage value plot saved to: rolling_horizon_storage_value.png")
+display(ps)
 println()
 
 end  

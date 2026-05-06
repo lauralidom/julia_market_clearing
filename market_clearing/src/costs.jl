@@ -440,6 +440,8 @@ function print_delivery_hour_audit(all_results::Dict, cfg::Dict)
 end
 
 
+
+
 function calculate_average_daily_metrics(all_results::Dict, cfg::Dict)
     sim_days = Int(cfg["rolling_horizon"]["simulation_days"])
     
