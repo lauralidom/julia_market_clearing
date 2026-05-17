@@ -8,6 +8,11 @@ rolling_horizon:
   reclear_frequency: 1            # reclear every N hours
   gate_closure: 1                 # hours locked from gate closure (no adjustment allowed)
   forecast_noise_std: 0.20        # standard deviation of wind forecast noise (0 = no noise)
+  wind_noise_mode: "predefined"
+  wind_noise_seed: 20260325       # used only when generating the scenario file the first time
+  wind_noise_scenario_path: "Results/thesis_runs/_shared_inputs/wind_forecast_error_shared_final_20260502.csv"
+  wind_noise_max_look_ahead: 72   # ensure one shared scenario covers 36h/48h/72h cases
+  wind_noise_total_hours: 792      # 30 days * 24h + 72h headroom
 
 
 # Generator parameters

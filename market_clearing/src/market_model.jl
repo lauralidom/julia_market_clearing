@@ -10,6 +10,34 @@
 
 using JuMP
 
+function collect_computation_record(m::Model, clearing::Int, current_hour::Int,
+                                    look_ahead::Int, executed_hours::Int,
+                                    wall_solve_seconds::Float64, status)
+    solver_reported_seconds = try
+        solve_time(m)
+    catch
+        NaN
+    end
+
+    constraint_count = try
+        num_constraints(m; count_variable_in_set_constraints=false)
+    catch
+        missing
+    end
+
+    return (
+        clearing = clearing,
+        current_hour = current_hour,
+        look_ahead_h = look_ahead,
+        executed_hours = executed_hours,
+        wall_solve_seconds = wall_solve_seconds,
+        solver_reported_seconds = solver_reported_seconds,
+        termination_status = string(status),
+        variables = num_variables(m),
+        constraints = constraint_count,
+    )
+end
+
 function build_market_clearing!(m::Model)
 
     m.ext[:variables]   = Dict{Symbol,Any}()

@@ -17,7 +17,12 @@ begin
 local clearing_count, m, q_val, g_planned_val, Qd_val, λ, SOC_val, prev_q_financial, storage_soc_carryover
 
 # Load configuration
-cfg = YAML.load_file("input_data_rolling.yaml")
+if @isdefined(MARKET_CLEARING_CFG_OVERRIDE)
+    cfg = deepcopy(MARKET_CLEARING_CFG_OVERRIDE)
+else
+    cfg_path = @isdefined(MARKET_CLEARING_CFG_PATH) ? MARKET_CLEARING_CFG_PATH : "input_data_rolling.yaml"
+    cfg = YAML.load_file(cfg_path)
+end
 apply_simulation_month!(cfg)
 
 # Extract rolling horizon parameters
@@ -33,18 +38,31 @@ simulation_start_hour = Int(get(rh_params, "simulation_start_hour", 0))
 @assert look_ahead >= 1 "look_ahead_window must be positive"
 
 
-# Stop at the last clearing where fixed and rolling both still have the full horizon.
-simulated_delivery_hours = calculate_comparable_delivery_hours(cfg)
+# Stop at the configured comparable-delivery horizon.
+# By default this follows the existing comparability logic, but thesis case
+# definitions can override it for specific studies such as foresight tests.
+simulated_delivery_hours = Int(get(rh_params, "comparable_delivery_hours_override", calculate_comparable_delivery_hours(cfg)))
 total_hours = simulated_delivery_hours + look_ahead
+wind_forecast_errors = load_or_create_wind_forecast_error_scenario!(cfg, forecast_noise, total_hours, look_ahead)
 
 println("Rolling Horizon Market Clearing Simulation")
 println("Simulation: $sim_days days from $(lpad(simulation_start_hour, 2, '0')):00 | Look-ahead: $look_ahead hours | Reclear frequency: every $reclear_freq hour(s)")
+if haskey(rh_params, "comparable_delivery_hours_override")
+    println("Comparable delivery hours override detected: $(rh_params["comparable_delivery_hours_override"])")
+end
 println("Comparable delivered hours: $simulated_delivery_hours")
 println("Gate closure: $gate_closure hour(s) | Peak+Wind flexible, Base+Mid+Solar locked during gate closure")
+if wind_forecast_errors !== nothing
+    println("Wind forecast error mode: $(wind_noise_mode(cfg)) ($(wind_noise_scenario_path(cfg)))")
+end
 println()
 
-# Load the base data structure
-data = load_input_data("input_data_rolling.yaml")
+# Load the base data structure from the effective config used for this run
+data = Dict{Symbol,Any}()
+data[:dispatchableGenerators] = cfg["dispatchableGenerators"]
+data[:variableGenerators]     = get(cfg, "variableGenerators", Dict())
+data[:demandSegments] = cfg["demand"]["segments"]
+data[:batteryStorage] = get(cfg, "batteryStorage", nothing)
 
 # Load and expand time series for entire simulation
 Pr_gen_full, Q_gen_full, Pr_dem_full, Q_dem_full = load_and_expand_timeseries(cfg, total_hours)
@@ -61,6 +79,7 @@ all_results[:clearing_times] = Int[]                        # Global hour of eac
 all_results[:prices] = Dict{Int, Vector{Float64}}()         # prices[clearing] = [λ per hour]
 all_results[:dispatch] = Dict{Int, Dict}()                  # dispatch[clearing][generator] = g_planned values
 all_results[:storage_energy_capacity] = float(cfg["batteryStorage"]["energyCapacity"])
+all_results[:computation] = NamedTuple[]
 
 # Detailed clearing data for analysis
 all_results[:clearing_details] = Dict{Int, Dict}()
@@ -113,7 +132,6 @@ storage_soc_carryover = float(cfg["batteryStorage"]["initialSOC"]) * float(cfg["
 
 clearing_count = 0
 # Initialize wind forecast error state for AR(1) smoothing
-forecast_error_per_hour = Dict{Int, Float64}()
 
 for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     clearing_count += 1
@@ -187,7 +205,15 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     
     # Add autocorrelated forecast noise to wind (AR(1) smoothing across windows)
     if forecast_noise > 0.0
-        add_wind_forecast_noise!(Q_gen_window, cfg, forecast_noise, IG, look_ahead, forecast_error_per_hour, current_hour)
+        add_wind_forecast_noise!(
+            Q_gen_window,
+            cfg,
+            forecast_noise,
+            IG,
+            look_ahead,
+            current_hour;
+            precomputed_errors=wind_forecast_errors,
+        )
     end
     
     # Override executed hours (1 to reclear_freq) with REALIZED renewable values
@@ -265,9 +291,20 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     
     # Build and solve
     build_market_clearing!(m)
+    solve_wall_start = time()
     optimize!(m)
+    solve_wall_seconds = time() - solve_wall_start
     
     status = termination_status(m)
+    push!(all_results[:computation], collect_computation_record(
+        m,
+        clearing_count,
+        current_hour,
+        look_ahead,
+        actual_executed_hours,
+        solve_wall_seconds,
+        status,
+    ))
     
     @assert status == OPTIMAL "Optimization failed with status: $status"
     
@@ -293,6 +330,8 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     all_results[:prices][clearing_count] = prices_window
     all_results[:dispatch][clearing_count] = Dict(g => [g_planned_val[g, h] for h in 1:look_ahead] for g in IG)
     
+    imbalance_h1 = clearing_count == 1 ? 0.0 : compute_signed_peak_wind_imbalance_h1(Q_prev, g_planned_val)
+
     # Store detailed data for this clearing (including demand and storage)
     all_results[:clearing_details][clearing_count] = Dict(
         :current_hour => current_hour,
@@ -313,7 +352,8 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
         :storage_soc_end_window => SOC_val[look_ahead],
         :wind_available_h1 => Q_gen_window[("Wind", 1)],
         :wind_executed_h1 => g_planned_val["Wind", 1],
-        :wind_curtailment_h1 => max(0.0, Q_gen_window[("Wind", 1)] - g_planned_val["Wind", 1])
+        :wind_curtailment_h1 => max(0.0, Q_gen_window[("Wind", 1)] - g_planned_val["Wind", 1]),
+        :imbalance_h1 => imbalance_h1,
     )
 
     # Accumulate curtailment mismatches for summary reporting
@@ -323,6 +363,12 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
     end
     if wind_curtailment_h1 > 1e-6
         push!(all_results[:curtailment_energy], wind_curtailment_h1)
+    end
+    if !haskey(all_results, :imbalance_energy)
+        all_results[:imbalance_energy] = Float64[]
+    end
+    if abs(imbalance_h1) > 1e-6
+        push!(all_results[:imbalance_energy], imbalance_h1)
     end
     
     # Extract updated position for next window as financial position
@@ -381,29 +427,65 @@ println()
 total_clearings = clearing_count
 curtailment_events = haskey(all_results, :curtailment_energy) ? length(all_results[:curtailment_energy]) : 0
 total_curtailment = haskey(all_results, :curtailment_energy) ? sum(all_results[:curtailment_energy]) : 0.0
+imbalance_events = haskey(all_results, :imbalance_energy) ? length(all_results[:imbalance_energy]) : 0
+total_imbalance = haskey(all_results, :imbalance_energy) ? sum(all_results[:imbalance_energy]) : 0.0
 if curtailment_events > 0
     println("[SUMMARY] Wind curtailment in h=1: ", curtailment_events, " hours with curtailment, totaling ", round(total_curtailment; digits=2), " MWh across ", total_clearings, " clearings.")
 else
     println("[SUMMARY] No wind curtailment in h=1.")
 end
-p = plot_rolling_horizon_results(all_results)
-savefig(p, "rolling_horizon_results.png")
-println("Plot saved to: rolling_horizon_results.png")
-display(p)
+if imbalance_events > 0
+    println("[SUMMARY] Signed imbalance in h=1: ", imbalance_events, " hours with nonzero imbalance, net ", round(total_imbalance; digits=2), " MWh (+ up / - down) across ", total_clearings, " clearings.")
+else
+    println("[SUMMARY] No signed imbalance in h=1.")
+end
+output_dir = @isdefined(MARKET_CLEARING_OUTPUT_DIR) ? MARKET_CLEARING_OUTPUT_DIR : "."
+plot_selection = @isdefined(MARKET_CLEARING_PLOT_SELECTION) ? MARKET_CLEARING_PLOT_SELECTION : Dict(
+    :case_overview => true,
+    :price_storage_timing => true,
+    :storage_value => true,
+)
+display_plots = @isdefined(MARKET_CLEARING_DISPLAY_PLOTS) ? MARKET_CLEARING_DISPLAY_PLOTS : true
+skip_plots = @isdefined(MARKET_CLEARING_SKIP_PLOTS) ? MARKET_CLEARING_SKIP_PLOTS : false
+
+if !skip_plots && get(plot_selection, :case_overview, true)
+    p = plot_rolling_horizon_results(all_results)
+    overview_path = joinpath(output_dir, "rolling_horizon_results.png")
+    savefig(p, overview_path)
+    println("Plot saved to: $(overview_path)")
+    display_plots && display(p)
+end
 println()
 
-print_battery_diagnostics(all_results)
-pt = plot_price_storage_timing_diagnostics(all_results)
-savefig(pt, "rolling_horizon_price_storage_timing.png")
-println("Price/storage timing plot saved to: rolling_horizon_price_storage_timing.png")
-display(pt)
-println()
+if !skip_plots && isdefined(@__MODULE__, :print_battery_diagnostics)
+    print_battery_diagnostics(all_results)
+end
+if !skip_plots && get(plot_selection, :price_storage_timing, true)
+    pt = plot_price_storage_timing_diagnostics(all_results)
+    timing_path = joinpath(output_dir, "rolling_horizon_price_storage_timing.png")
+    savefig(pt, timing_path)
+    println("Price/storage timing plot saved to: $(timing_path)")
+    display_plots && display(pt)
+    println()
+end
 
-print_storage_value_diagnostics(all_results)
-ps = plot_storage_value_diagnostics(all_results)
-savefig(ps, "rolling_horizon_storage_value.png")
-println("Storage value plot saved to: rolling_horizon_storage_value.png")
-display(ps)
-println()
+if !skip_plots && isdefined(@__MODULE__, :print_storage_value_diagnostics)
+    print_storage_value_diagnostics(all_results)
+end
+if !skip_plots && get(plot_selection, :storage_value, true)
+    ps = plot_storage_value_diagnostics(all_results)
+    storage_value_path = joinpath(output_dir, "rolling_horizon_storage_value.png")
+    savefig(ps, storage_value_path)
+    println("Storage value plot saved to: $(storage_value_path)")
+    display_plots && display(ps)
+    println()
+end
+
+if @isdefined(MARKET_CLEARING_RESULTS_REF)
+    MARKET_CLEARING_RESULTS_REF[] = all_results
+end
+if @isdefined(MARKET_CLEARING_CFG_REF)
+    MARKET_CLEARING_CFG_REF[] = cfg
+end
 
 end  

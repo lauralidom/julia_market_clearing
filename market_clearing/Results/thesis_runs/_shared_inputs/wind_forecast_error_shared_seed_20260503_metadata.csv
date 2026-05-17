@@ -1,0 +1,12 @@
+key,value
+mode,predefined
+seed,20260503
+num_rows,59652
+min_window_start_hour,1
+max_window_start_hour,864
+min_abs_hour,1
+max_abs_hour,864
+min_lead_time,1
+max_lead_time,72
+forecast_noise_std,0.2
+scenario_csv,Results\thesis_runs\_shared_inputs\wind_forecast_error_shared_seed_20260503.csv

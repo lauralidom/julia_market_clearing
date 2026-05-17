@@ -1,0 +1,196 @@
+HYPOTHESIS FORESIGHT:
+
+Hypothesis 1: 36h already captures almost all valuable storage cycles
+
+Claim: most of the battery’s economically important charge-discharge cycles are shorter than 36 hours.
+
+How to test
+
+Compute storage cycle / dwell-time diagnostics:
+
+time between charging and corresponding discharging,
+distribution of storage residence time,
+share of discharged energy that was charged within:
+12h,
+24h,
+36h,
+48h.
+
+If most discharged MWh comes from energy stored less than 24–36h earlier, then it makes sense that 48h/72h add little.
+
+This is probably the single best extra analysis.
+
+Hypothesis 2: the large battery makes the system less scarcity-sensitive, so extra foresight matters less
+
+Claim: once storage is large, the system is already smoothed enough that longer foresight has little room to improve.
+
+How to test
+
+Compare small vs large battery on:
+
+price duration curves,
+residual load duration curves,
+curtailment distribution,
+Mid+Peak dispatch distribution,
+number of “tight” hours above some threshold, not just scarcity >150.
+
+For example, count hours with:
+
+price > 80,
+price > 100,
+Mid+Peak dispatch > X,
+low SOC + high residual load.
+
+If the large battery compresses these stress hours strongly, that supports the explanation.
+
+Hypothesis 3: battery operation is limited more by power than by energy
+
+Claim: even with more energy capacity, the battery cannot do much more at the critical hours because 4 GW power is the active constraint.
+
+How to test
+
+Measure:
+
+share of hours battery hits charging power limit,
+share of hours battery hits discharging power limit,
+share of hours SOC is near full or near empty.
+
+Interpretation:
+
+if it often hits power limits but rarely energy limits, then more horizon will not help much;
+if it often hits energy limits, then maybe longer foresight should matter more.
+
+This is a very useful diagnostic.
+
+Hypothesis 4: longer horizons are changing demand-service decisions, not thermal efficiency
+
+Claim: in the large-battery case, the welfare gain comes mainly from slightly more valuable demand served, not from better cost minimisation.
+
+How to test
+
+Decompose welfare change:
+
+change in demand value,
+change in generation cost,
+perhaps split demand value into:
+base demand served,
+flex demand served.
+
+You already partly have this. Make it explicit in a small decomposition table.
+
+That will justify why cost can rise while welfare rises.
+
+Hypothesis 5: results are non-monotonic because the true effect is small relative to stochastic noise
+
+Claim: 48h and 72h are genuinely close, and current differences are not statistically robust.
+
+How to test
+
+Run multiple seeds / Monte Carlo replications for each horizon:
+
+same setup,
+different wind forecast error seeds.
+
+Then report:
+
+mean KPI,
+standard deviation,
+confidence interval.
+
+This is the cleanest way to prove whether 48h really beats 72h or not. Right now you should be cautious without this.
+
+Hypothesis 6: the battery mostly shifts within day, not across days
+
+This is related to Hypothesis 1 but more visual.
+
+How to test
+
+Plot:
+
+average SOC by hour of day,
+average net discharge by hour of day,
+maybe SOC autocorrelation or day-boundary carryover.
+
+If SOC largely resets on a daily rhythm, then even the 10h battery is mainly operating as a daily shifter, not a multi-day asset. Then 72h foresight has limited extra value.
+
+Best extra analyses to prioritise
+
+If you only do a few, I would choose these:
+
+1. Storage residence-time / cycle-length analysis
+
+Most directly answers why 36h may already be enough.
+
+2. Battery constraint binding analysis
+
+Power-limited vs energy-limited tells you why huge storage may still not benefit much from longer horizon.
+
+3. Stress-hour compression analysis
+
+Compare small vs large battery on price and thermal/curtailment distributions.
+
+4. Multi-seed robustness
+
+Needed if you want to say anything strong about 48h vs 7
+
+HYPOTHESIS FIXED: 
+1. Most of the economically relevant decisions are short-term anyway
+
+Even though Rolling always sees a full 36h ahead, the system may be driven mainly by:
+
+same-day load and RES patterns,
+morning/evening peaks,
+short battery cycles,
+near-term thermal adjustments.
+
+If most valuable decisions happen within, say, the next 12–24h, then the shrinking Fixed case still sees enough of the future most of the time to make almost the same choices.
+
+2. Both designs are already highly adaptive
+
+This is a big one.
+
+Your Fixed 36h case is not a static day-ahead benchmark. It still:
+
+re-clears every hour,
+updates positions every hour,
+carries SOC and generator states forward,
+and only executes one hour at a time.
+
+So Fixed is already very dynamic. The only difference is that its visible horizon shrinks from 36h to 13h before resetting. That makes it much closer to Rolling than the label “fixed” might suggest.
+
+3. Hourly reclearing corrects most earlier mistakes
+
+Even if Fixed becomes more myopic later in the cycle, it gets another chance to optimise one hour later. That means the cost of limited foresight is damped. Bad intertemporal choices do not remain locked in for very long.
+
+4. Gate closure is short and flexibility remains available
+
+With only a 1h gate closure, and with some technologies still flexible close to delivery, the system can still repair a lot near real time. So the value of continuously seeing further ahead is reduced.
+
+5. The battery is mostly short-cycle
+
+Your residence-time analysis supports this strongly, especially for the baseline battery. If the battery mostly charges and discharges within 24h, then a shrinking horizon that is still usually well above that range may not handicap it very much.
+
+This is one of the cleanest explanations.
+
+6. Scarcity is limited
+
+If there are very few truly tight hours, then preserving flexibility for far-ahead extreme events matters less. Horizon effects are usually strongest when future scarcity is important and easy to miss. In your baseline case, scarcity seems mild.
+
+7. Both models still suffer finite-horizon end effects
+
+Rolling is better because it always keeps 36h visible, but it still has an end of horizon. So Rolling is not a perfect full-foresight benchmark. If both models share some finite-horizon weakness, their outcomes can remain close.
+
+8. The system is dominated by regular daily structure
+
+If the underlying demand, wind, and solar patterns are fairly repetitive, then both designs may repeatedly converge to the same broad schedule:
+
+charge in low-price hours,
+discharge in morning/evening peaks,
+use RES when available,
+lean on Mid/Peak in tighter hours.
+
+Then the difference is only in fine timing, not in regime.
+
+9. Forecast uncertainty may not bite hard enough
+
+Since only wind is noisy and the executed hour is realised, the actual delivery stage is partially protected from forecast error. That reduces the penalty of not having the longest possible foresight.

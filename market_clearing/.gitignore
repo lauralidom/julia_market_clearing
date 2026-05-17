@@ -1,0 +1,27 @@
+# Local Julia cache
+.julia_depot/
+
+# Generated model results
+Results/**
+!Results/
+!Results/thesis_runs/
+!Results/thesis_runs/_shared_inputs/
+!Results/thesis_runs/_shared_inputs/*.csv
+
+# Root-level generated outputs
+economic_summary.xlsx
+*_summary.xlsx
+*.png
+
+# Old local experiments and empty/report folders
+archive/
+refine_plots_report/
+
+# Temporary files
+tmp_*.jl
+*.tmp
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/

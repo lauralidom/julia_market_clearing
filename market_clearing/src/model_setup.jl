@@ -7,6 +7,7 @@ using CSV
 using DataFrames
 using Dates
 using Distributions
+using Random
 
 # 0: Load Input Data from YAML
 function load_input_data(path::String)
@@ -395,15 +396,72 @@ end
 
 const phi = 0.8  # AR(1) autocorrelation coefficient for wind forecast errors, 0.0 errors are independent, 0.8 is strong correlation (recommended for wind)
 
-function add_wind_forecast_noise!(Q_gen_window::Dict,cfg::Dict,max_noise_std::Float64,
-IG::Vector,window_length::Int,forecast_error_per_hour::Dict{Int, Float64},
-window_start_hour::Int)
-    if max_noise_std == 0.0 || window_length <= 1
+function wind_noise_mode(cfg::Dict)
+    rh = get(cfg, "rolling_horizon", Dict())
+    mode = lowercase(String(get(rh, "wind_noise_mode", "predefined")))
+    mode == "predefined" || error("rolling_horizon.wind_noise_mode=$(mode) is no longer supported; use predefined with a shared CSV scenario")
+    return mode
+end
+
+function wind_noise_scenario_path(cfg::Dict)
+    rh = get(cfg, "rolling_horizon", Dict())
+    default_path = joinpath("Results", "thesis_runs", "_shared_inputs", "wind_forecast_error_shared_final_20260502.csv")
+    return String(get(rh, "wind_noise_scenario_path", default_path))
+end
+
+# Legacy raw-draw scenario helpers removed — replaced by
+# Shared wind forecast errors are stored once as final multiplicative
+# errors per `(window_start_hour, abs_hour)` and reused by all runs.
+
+function anchored_forecast_std(lead_time::Int, max_noise_std::Float64)
+    lead_time <= 1 && return 0.0
+
+    # Preserve the existing 36h behavior exactly on 1..36h:
+    # std = max_noise_std * sqrt((lead_time - 1) / 35)
+    # Then extend the curve with anchored square-root growth so that
+    # equal absolute lead times imply equal forecast uncertainty
+    # across all look-ahead cases.
+    anchor_hours = [1, 36, 48, 72]
+    anchor_stds = [
+        0.0,
+        max_noise_std,
+        max_noise_std + 0.05,
+        max_noise_std + 0.10,
+    ]
+
+    if lead_time <= anchor_hours[2]
+        return anchor_stds[2] * sqrt((lead_time - 1) / (anchor_hours[2] - 1))
+    end
+
+    if lead_time >= anchor_hours[end]
+        return anchor_stds[end]
+    end
+
+    for idx in 2:(length(anchor_hours) - 1)
+        h1 = anchor_hours[idx]
+        h2 = anchor_hours[idx + 1]
+        s1 = anchor_stds[idx]
+        s2 = anchor_stds[idx + 1]
+
+        if h1 < lead_time <= h2
+            frac = (lead_time - h1) / (h2 - h1)
+            curved_frac = sqrt(frac)
+            return s1 + (s2 - s1) * curved_frac
+        end
+    end
+
+    return anchor_stds[end]
+end
+
+function add_wind_forecast_noise!(Q_gen_window::Dict, cfg::Dict, max_noise_std::Float64,
+IG::Vector, window_length::Int, window_start_hour::Int; precomputed_errors::Union{Nothing, Dict{Tuple{Int, Int}, Float64}}=nothing)
+    if window_length <= 1 || max_noise_std == 0.0
         return
     end
 
+    precomputed_errors === nothing && error("precomputed_errors is required when wind forecast noise is enabled")
+
     var_gen = cfg["variableGenerators"]
-    t_dist = TDist(10)
 
     for (gname, gdata_any) in var_gen
         g = String(gname)
@@ -412,39 +470,171 @@ window_start_hour::Int)
             Q = float(gdata_any["capacity"])
 
             for h in 1:window_length
-                # Absolute delivery hour in the full simulation
                 abs_hour = window_start_hour + h - 1
 
-                # Hour 1 = realised wind, so no forecast error
                 if h == 1
-                    forecast_error_per_hour[abs_hour] = 0.0
                     continue
                 end
 
-                # Step 1: lead-time dependent std dev
-                time_factor = sqrt((h - 1) / (window_length - 1))
-                std_dev = max_noise_std * time_factor
+                haskey(precomputed_errors, (window_start_hour, abs_hour)) || error("Missing precomputed wind forecast error for ($(window_start_hour), $(abs_hour))")
+                new_error = precomputed_errors[(window_start_hour, abs_hour)]
 
-                # Step 2: get previous error for this same delivery hour
-                prev_error = get(forecast_error_per_hour, abs_hour, 0.0)
-
-                # Step 3: add correlated update
-                # sqrt(1 - phi^2) keeps the overall volatility roughly at std_dev
-                innovation = rand(t_dist) * std_dev * sqrt(1 - phi^2)
-                new_error = phi * prev_error + innovation
-
-                # Step 4: apply multiplicative error: it depends on current forecast not total capacity
                 current_value = Q_gen_window[(g, h)]
                 current_af = current_value / Q
-
                 new_af = clamp(current_af * (1 + new_error), 0.0, 1.0)
                 Q_gen_window[(g, h)] = Q * new_af
-
-                # Step 5: store updated error for next forecast refresh
-                forecast_error_per_hour[abs_hour] = new_error
             end
         end
     end
+end
+
+function generate_wind_forecast_error_scenario(simulation_hours::Int, max_window_length::Int, max_noise_std::Float64; seed::Int=20260325, df::Int=10)
+    simulation_hours >= 1 || error("simulation_hours must be >= 1")
+    max_window_length >= 1 || error("max_window_length must be >= 1")
+    max_noise_std >= 0.0 || error("max_noise_std must be >= 0")
+
+    rng = MersenneTwister(seed)
+    t_dist = TDist(df)
+    forecast_errors = Dict{Tuple{Int, Int}, Float64}()
+    rows = DataFrame(
+        window_start_hour=Int[],
+        abs_hour=Int[],
+        lead_time=Int[],
+        raw_draw=Float64[],
+        z_value=Float64[],
+        std_dev=Float64[],
+        forecast_error=Float64[],
+    )
+
+    max_abs_hour = simulation_hours + max_window_length
+    for abs_hour in 1:max_abs_hour
+        z_prev = 0.0
+        earliest_window_start = max(1, abs_hour - max_window_length + 1)
+        latest_window_start = abs_hour
+
+        for window_start_hour in earliest_window_start:latest_window_start
+            lead_time = abs_hour - window_start_hour + 1
+
+            if lead_time == 1
+                raw_draw = 0.0
+                z_value = 0.0
+                std_dev = 0.0
+                forecast_error = 0.0
+            else
+                raw_draw = rand(rng, t_dist)
+                if window_start_hour == earliest_window_start
+                    # The first available forecast update for a delivery hour has no
+                    # previous window to correlate with, so start the standardized
+                    # process at a full innovation draw instead of a damped zero state.
+                    z_value = raw_draw
+                else
+                    z_value = phi * z_prev + sqrt(1 - phi^2) * raw_draw
+                end
+                std_dev = anchored_forecast_std(lead_time, max_noise_std)
+                forecast_error = std_dev * z_value
+                z_prev = z_value
+            end
+
+            forecast_errors[(window_start_hour, abs_hour)] = forecast_error
+            push!(rows, (window_start_hour, abs_hour, lead_time, raw_draw, z_value, std_dev, forecast_error))
+        end
+    end
+
+    return forecast_errors, rows
+end
+
+function validate_wind_forecast_error_coverage(forecast_errors::AbstractDict{Tuple{Int, Int}, Float64},
+                                               simulation_hours::Int,
+                                               max_window_length::Int)
+    simulation_hours >= 1 || error("simulation_hours must be >= 1")
+    max_window_length >= 1 || error("max_window_length must be >= 1")
+
+    missing_examples = Tuple{Int, Int}[]
+    missing_count = 0
+
+    for window_start_hour in 1:simulation_hours
+        for lead_time in 1:max_window_length
+            abs_hour = window_start_hour + lead_time - 1
+            if !haskey(forecast_errors, (window_start_hour, abs_hour))
+                missing_count += 1
+                if length(missing_examples) < 5
+                    push!(missing_examples, (window_start_hour, abs_hour))
+                end
+            end
+        end
+    end
+
+    if missing_count > 0
+        example_str = join(["($(window_start_hour), $(abs_hour))" for (window_start_hour, abs_hour) in missing_examples], ", ")
+        error("Wind forecast error scenario is missing $missing_count required (window_start_hour, abs_hour) pairs; first missing examples: $example_str")
+    end
+
+    return nothing
+end
+
+function wind_forecast_error_rows_from_csv(scenario_path::AbstractString)
+    isfile(scenario_path) || error("Scenario file not found: $scenario_path")
+
+    df = CSV.read(scenario_path, DataFrame)
+    required_cols = [:window_start_hour, :abs_hour, :lead_time, :forecast_error]
+    for col in required_cols
+        hasproperty(df, col) || error("Scenario CSV missing required column: $(String(col))")
+    end
+
+    if !hasproperty(df, :raw_draw)
+        df.raw_draw = zeros(Float64, nrow(df))
+    end
+    if !hasproperty(df, :z_value)
+        df.z_value = zeros(Float64, nrow(df))
+    end
+    if !hasproperty(df, :std_dev)
+        df.std_dev = zeros(Float64, nrow(df))
+    end
+
+    forecast_errors = Dict{Tuple{Int, Int}, Float64}()
+    for row in eachrow(df)
+        window_start_hour = Int(row.window_start_hour)
+        abs_hour = Int(row.abs_hour)
+        lead_time = Int(row.lead_time)
+        lead_time == abs_hour - window_start_hour + 1 || error("Inconsistent lead_time in scenario CSV for ($window_start_hour, $abs_hour)")
+        haskey(forecast_errors, (window_start_hour, abs_hour)) && error("Duplicate scenario CSV row for ($window_start_hour, $abs_hour)")
+        forecast_errors[(window_start_hour, abs_hour)] = Float64(row.forecast_error)
+    end
+
+    return forecast_errors, maximum(df.window_start_hour), maximum(df.abs_hour)
+end
+
+function write_wind_forecast_error_rows_csv(scenario_path::AbstractString, rows::DataFrame)
+    mkpath(dirname(scenario_path))
+    CSV.write(scenario_path, rows)
+    return rows
+end
+
+function load_or_create_wind_forecast_error_scenario!(cfg::Dict, max_noise_std::Float64, simulation_hours::Int, max_window_length::Int)
+    wind_noise_mode(cfg)
+
+    scenario_path = wind_noise_scenario_path(cfg)
+    rh = get(cfg, "rolling_horizon", Dict())
+    noise_seed = Int(get(rh, "wind_noise_seed", 20260325))
+    scenario_total_hours = max(simulation_hours, Int(get(rh, "wind_noise_total_hours", simulation_hours)))
+    scenario_max_window_length = max(max_window_length, Int(get(rh, "wind_noise_max_look_ahead", max_window_length)))
+    required_abs_hour = scenario_total_hours + scenario_max_window_length
+
+    if isfile(scenario_path)
+        endswith(lowercase(scenario_path), ".csv") || error("Predefined wind forecast error scenario must be a CSV file: $scenario_path")
+        forecast_errors, stored_max_window_start, stored_max_abs_hour = wind_forecast_error_rows_from_csv(scenario_path)
+        if stored_max_window_start < scenario_total_hours || stored_max_abs_hour < required_abs_hour
+            error("Wind forecast error scenario file is too small for this run. Increase wind_noise_total_hours or wind_noise_max_look_ahead and regenerate: $scenario_path")
+        end
+        validate_wind_forecast_error_coverage(forecast_errors, scenario_total_hours, scenario_max_window_length)
+        return forecast_errors
+    end
+
+    forecast_errors, rows = generate_wind_forecast_error_scenario(scenario_total_hours, scenario_max_window_length, max_noise_std; seed=noise_seed)
+    endswith(lowercase(scenario_path), ".csv") || error("Predefined wind forecast error scenario must be a CSV file: $scenario_path")
+    write_wind_forecast_error_rows_csv(scenario_path, rows)
+    validate_wind_forecast_error_coverage(forecast_errors, scenario_total_hours, scenario_max_window_length)
+    return forecast_errors
 end
 
 # 5: Extract updated position (g_planned) as next financial position
@@ -484,8 +674,37 @@ function prepare_Q_prev_for_next_window(prev_q_financial::Dict, window_length::I
     return Q_prev
 end
 
+function compute_signed_peak_wind_imbalance_h1(Q_prev::AbstractDict, g_planned_val; atol::Float64=1e-6)
+    wind_key = ("Wind", 1)
+    peak_key = ("Peak", 1)
+    if !haskey(Q_prev, wind_key) || !haskey(Q_prev, peak_key)
+        return 0.0
+    end
+
+    wind_delta = float(g_planned_val["Wind", 1]) - float(Q_prev[wind_key])
+    peak_delta = float(g_planned_val["Peak", 1]) - float(Q_prev[peak_key])
+
+    if abs(wind_delta) <= atol || abs(peak_delta) <= atol
+        return 0.0
+    end
+
+    # Keep only the part of the Peak re-dispatch that offsets the last-minute
+    # wind deviation. Positive means Peak ramps up; negative means Peak ramps down.
+    if sign(wind_delta) == -sign(peak_delta)
+        return sign(peak_delta) * min(abs(wind_delta), abs(peak_delta))
+    end
+
+    return 0.0
+end
+
 function calculate_comparable_delivery_hours(cfg::Dict)
     rh = cfg["rolling_horizon"]
+    # Honor an explicit override if present so callers can force identical delivered
+    # hours across different runner modes.
+    if haskey(rh, "comparable_delivery_hours_override")
+        return Int(rh["comparable_delivery_hours_override"])
+    end
+
     sim_days = Int(rh["simulation_days"])
     reclear_freq = Int(rh["reclear_frequency"])
     max_look_ahead = Int(rh["look_ahead_window"])
