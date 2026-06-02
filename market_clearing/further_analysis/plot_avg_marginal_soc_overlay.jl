@@ -2,7 +2,7 @@ using Serialization
 using JuMP
 using Plots
 
-const RUN_DIR = joinpath("Results", "thesis_runs", "baseline_20260320_205737_withstoragestory")
+const RUN_DIR = joinpath("Results", "thesis_runs", "all_20260521_160902")
 const CASE_FOLDERS = Dict(
     "Fixed 36h" => "fixed_36h",
     "Rolling 36h" => "rolling_36h",

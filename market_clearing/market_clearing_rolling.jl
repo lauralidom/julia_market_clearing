@@ -404,6 +404,10 @@ for start_hour in 1:reclear_freq:(total_hours - look_ahead)
 
     soc_end = round(SOC_val[h]; digits=1)
 
+    if clearing_count <= 2
+        println(m)
+    end
+
     if clearing_count <= 5 || clearing_count % 50 == 0
         println("Clearing $clearing_count (global hour $current_hour): Price h=1: $λ_h1 €/MWh | SOC_end: $soc_end MWh | Ch=$(round(Qch_val[h]; digits=1)) | Dis=$(round(Qdis_val[h]; digits=1))")
     end

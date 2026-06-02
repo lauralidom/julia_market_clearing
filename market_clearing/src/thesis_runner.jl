@@ -971,6 +971,12 @@ function apply_case_overrides(base_cfg::AbstractDict, case_def::AbstractDict)
     if haskey(case_def, :battery_initial_soc)
         cfg["batteryStorage"]["initialSOC"] = case_def[:battery_initial_soc]
     end
+    if haskey(case_def, :ramp_rate_override)
+        for (gen_name, gen_data) in cfg["dispatchableGenerators"]
+            gen_data["rampRate"] = case_def[:ramp_rate_override]
+            cfg["dispatchableGenerators"][gen_name] = gen_data
+        end
+    end
 
     apply_simulation_month!(cfg)
     return cfg

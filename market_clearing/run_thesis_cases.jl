@@ -27,7 +27,7 @@ RUN_SET = "all"
 
 # If RUN_SET = "custom", list the exact case names you want here.
 CUSTOM_CASE_NAMES = [
-    "Rolling 48h",
+    "No storage Low ramp rates",
 ]
 
 # Shared wind forecast-error scenarios.
@@ -40,6 +40,14 @@ ACTIVE_WIND_SCENARIO_PATH = WIND_SCENARIO_BASELINE_PATH
 
 HIGH_STORAGE_ENERGY_CAPACITY_MWH = 96000.0
 HIGH_STORAGE_POWER_CAPACITY_MW = 4000.0
+
+NO_STORAGE_ENERGY_CAPACITY_MWH = 0.0
+NO_STORAGE_POWER_CAPACITY_MW = 0.0
+
+LOW_STORAGE_ENERGY_CAPACITY_MWH = 500.0
+LOW_STORAGE_POWER_CAPACITY_MW = 250.0
+
+LOW_RAMP_RATE = .05
 
 # Choose the cases to run editing this list
 CASE_DEFS = [
@@ -104,6 +112,26 @@ CASE_DEFS = [
         :battery_energy_capacity => HIGH_STORAGE_ENERGY_CAPACITY_MWH,
         :battery_power_capacity => HIGH_STORAGE_POWER_CAPACITY_MW,
         :wind_noise_scenario_path => ACTIVE_WIND_SCENARIO_PATH,
+    ),
+    Dict(
+        :name => "No storage Low ramp rates",
+        :mode => "rolling",
+        :look_ahead => 36,
+        :comparable_delivery_hours_override => 661,
+        :battery_energy_capacity => NO_STORAGE_ENERGY_CAPACITY_MWH,
+        :battery_power_capacity => NO_STORAGE_POWER_CAPACITY_MW,
+        :wind_noise_scenario_path => ACTIVE_WIND_SCENARIO_PATH,
+        :ramp_rate_override => LOW_RAMP_RATE,
+    ),
+    Dict(
+        :name => "Low storage Low ramp rates",
+        :mode => "rolling",
+        :look_ahead => 36,
+        :comparable_delivery_hours_override => 661,
+        :battery_energy_capacity => NO_STORAGE_ENERGY_CAPACITY_MWH,
+        :battery_power_capacity => NO_STORAGE_POWER_CAPACITY_MW,
+        :wind_noise_scenario_path => ACTIVE_WIND_SCENARIO_PATH,
+        :ramp_rate_override => LOW_RAMP_RATE,
     ),
 ]
 

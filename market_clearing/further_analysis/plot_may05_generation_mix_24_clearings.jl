@@ -3,7 +3,7 @@ using Plots
 using JuMP
 using HiGHS
 
-const RUN_DIR = joinpath("Results", "thesis_runs", "all_20260512_101146")
+const RUN_DIR = joinpath("Results", "thesis_runs", "all_20260521_160902")
 const OUTPUT_DIR = joinpath(RUN_DIR, "_summary", "baseline_market_design", "may05_generation_mix_24_clearings")
 const DAY_OF_MONTH = 5
 const NUM_CLEARINGS_TO_SHOW = 30
